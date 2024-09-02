@@ -1,0 +1,81 @@
+# model archive
+model_arch: TransformerKWS
+
+# model config
+model_config:
+  audio_net_config:
+    input_trans: &linear_common
+      dim: [200, 256]
+      num_block: 1
+      norm: LayerNorm
+      act: ReLU
+    transformer_config: 
+      size: 256
+      self_att: MultiHeadAtt
+      self_att_config: &att_common
+        n_head: 4
+        n_feats: 256
+      cross_att: MultiHeadCrossAtt
+      corss_att_config: 
+        n_head: 1
+        n_feats: 256
+        norm: LayerNorm
+      feed_forward_config: &feed_forward_common
+        dim: [256, 512, 256]
+        num_block: 1
+        norm: LayerNorm
+        act: ReLU
+  vocab_net_config:
+    num_token: 124 # 0;1: blank; phone: 1-120;120; special token [121,122];2, unk 123;1 :::  0-123=>124
+    input_trans: 
+      dim: 256
+      num_block: 1
+      norm: LayerNorm
+      act: ReLU
+    transformer_config:
+      size: 256
+      self_att: MultiHeadAtt
+      self_att_config: *att_common
+      feed_forward_config: *feed_forward_common
+  predict_token: [121, 122]
+  num_audio_block: 8
+  num_vocab_block: 4
+  loss_weight: [0.3, 1, 0.3]
+
+# experimental config
+exp_config:
+  trained_ckpt: ""
+  exp_dir: exp/transformer_kws_phone_subsample3_b32_mix_speech_no_unk_phone/
+  warm_up_peak_epoch: 10
+  exp_name: transformer_kws
+  optim_config:
+    lr: 0.001
+  log_config:
+    level: "INFO"
+    filemode: "a"
+    format:  "%(asctime)s: %(message)s"
+  log_interval: 5
+  valid_interval: 100
+
+# data config
+data_config: &base_data_config
+  epoch: 80
+  start_epoch: 7
+  shuffle: True
+  num_worker: 8
+  sph_config: !include config/base_config/self_corrupt_asr.yaml
+  keyword_config:
+    format: sample
+    config:
+      positive_prob: 0.5
+      special_token: 
+        sok: 121
+        eok: 122
+        unk: 123
+        with_trans: True
+
+  length_key: mixspeech,label,keyword
+  fetch_key: mixspeech,mixspeech_len,label,label_len,keyword,keyword_len,target
+  batch_size: 128
+  data_list: aishell_resource/datalist.train.txt
+  valid_list: aishell_resource/datalist.valid.txt

@@ -1,0 +1,58 @@
+安装：
+
+首先按照 INSTALL 配置环境，注意需要两个环境，一个 python 3.8 一个 3.9 INSTALL 中写明了版本的安装包要按版本来
+
+数据准备：
+
+当前版本的数据准备比以前容易了很多，环境配置好以后，在 python = 3.8 的环境中准备 datalist
+
+python hanlp_make_datalist.py text_scp wav.scp 
+两个 scp 文件都是 Kaldi 格式。
+！！注意， 目前的 hanlp 不支持英文字幕和阿拉伯数字，最好先过一些 text 将包含阿拉伯数字的和包含英文字母的 utterance 去掉
+
+hanlp_make_datalist.py 会生成三个文件
+1. datalist.txt 这个是训练需要的 datalist，直接将其分成两个 list datalist.train.txt 和 datalist.valid.txt 即可
+2. ！！注意，word2id， phone2id，这两个文件是将汉字和拼音映射成了 id，所以总共有多少个字和有多少个 phone 是训练语料决定的，
+   举个例子：如果训练语料特别少，很有可能 phone 都 cover 不全。所以虽然这个是 KWS 任务，但是训练涉及 ASR loss，收集语料的
+   时候，尽量按照 ASR 任务的标准收集。 慎用 Wenet speech，保证每一条 wav 中只有一个人说话。
+3. word2id 与 phone2id 都是从 3 开始编号的，因为 0 是 blank，1 是 start of keywords，2 是 end of keyword
+
+
+hanlp_make_datalist.py 生成好数据以后，需要修改训练用的 config，AishellHanlp.yaml
+1. 如果训练数据包含的汉字去重后有 5000 个，那么 word2id 的最大 id 号应该是 5003（因为从 3 开始编号），如果 phone 去重以后 id 最大为 100，那么phone2id
+最大 id 号为 103
+2. AishellHanlp.yaml 另外几个特殊 token 的编号，yaml 文件的第 97 和第 100 行，unk 与 punk，分别代表 word 级别的 unk token 和 phone 
+级别的 unk token，顺着各自的最大 id 往后加。根据 ReadMe 中的例子，unk 和 punk 分别应该是 5004 和 104
+3. AishellHanlp.yaml中的 63，64 行，sos （start of sentence） 和 eos （end of sentence） 需要继续顺着最大id 往后加， 
+按照 ReadMe 中的例子 sos 为 5005，eos 为 5006 
+4. AishellHanlp.yaml中的 33，34 行，   num_bpe_token, num_phn_token 分别代表最终 word token 的总数，和 phone token 的总数（包含 unk， punk， sos，eos）
+按照 ReadMe 中的例子，应该为 num_bpe_token：5007 和 num_phn_token：105
+
+AishellHanlp.yaml的其他说明：
+exp_dir： 实验路径
+sph_config: !include config/base_config/self_corrupt_none_target_corrupt.yaml， 这里的self_corrupt_none_target_corrupt.yaml中包含了一些训练过程中
+针对 speech data 的配置。这个强哥用了很多，可以咨询强哥。这里边的大部分参数可以先保留着。corrupt_list: noise.50.list  和 rirs_list: rirs.scp
+分别指定了做 data augmentation 需要的噪音的 list 和做 reverberation 需要的混响 list 这两个可以自定义。这两个 list 的格式为：
+xxxx/yyyy/zzzz/noise.1.wav ！！注意，这里没有 uttid，指定 wav 文件的路径即可！！！
+完成以上，就可以训练了
+
+
+训练方法：
+./run_train.sh --config AishellHanlp.yaml --GPU 0,1 --port 22123 
+这里的 port 不要与当前服务器上现有的一些服务重复。
+
+
+测试：
+python draft_test_fenyinta.py 
+这个自己看下 mian 里边的流程吧，这个很好懂， 注意修改 
+1. make_fenyinta()中需要的fenyinta_jiuming_test/keyword2phnseq 这个文件的 keywords 到 phone 的映射。
+2. load_model()方法中的 checkpoint 和 config 文件的路径，config 文件直接用训练所用的AishellHanlp.yaml即可
+
+
+
+
+！！注意。当前的 code 这是一个初步的版本，但是训练是没有问题的，唯一的问题就是有些代码的可读性稍微差一些，后续我会陆续调整。调整以下内容：
+
+1. data processing ， 让整个流程可配置的参数更加灵活，模块之间的调用关系更清晰
+2. onnx 转换以及 inference 速度上的优化
+3. 测试数据的格式转换流程化。

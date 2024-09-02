@@ -1,0 +1,78 @@
+# model archive
+model_arch: EfficientNet # 模型结构
+
+# model config
+model_config:
+  model_name: 'efficientnet-b0' # 模型具体结构可以是b0-b8
+  num_classes: 52 # 类别数 keyword 个数
+  task: 'MT' # Mix Training
+  mute_class: 52 # 非目标关键词的其他词的ID
+
+# experimental config
+exp_config:
+  finetune: # finetune 如果不fine-tune把line 12 - 14 注释或删除
+    trained_ckpt: resource/EfficientNetB0_avg.pt
+    percentage_fix_layer: 80 
+  exp_dir: exp/MixTraningN_EfficientB0 #模型目录 可以随便改
+  exp_name: EfficientNetB0 # save name 可以随便改
+  optim_config:
+    lr: 0.001 # learning rate 改不改影响不大
+  log_config: # log 相关的配置，保持默认即可
+    level: "INFO"
+    filemode: "a"
+    format:  "%(asctime)s: %(message)s"
+  log_interval: 5 # update 多少step 更新一次log
+  valid_interval: 100 # 基本已弃用，先留着
+
+# data config
+data_config: &base_data_config # Data config  &base_data_config  是yaml的语法， 相当于给后续所有的配置起个别名
+  epoch: 100 # 训练多少epoch
+  start_epoch: 0 # 从第几个epoch 开始，断点续训
+  shuffle: True # 保持默认 True
+  sph_config: # speech 也就是waveform相关的配置
+    data_type: raw # 直接读wav，也可以是kaldi 如果是kaldi则默认读scp 最好保持raw，因为所有的mix都是在waveform上做的
+    feats_type: fbank # 特征fbank
+    feats_config: #fbank config
+      num_mel_bins: 80
+      frame_length: 25
+      frame_shift: 10
+    self_corruption: # Mix-Traing的核心配置，保持默认即可
+      num_corrupt: 1
+      sampler: uniform
+      sampler_config:
+        low: 0.1
+        high: 0.9
+    none_target_corruption: #相当于data aug，就是吧corrupt_list中的噪音或者无关的人声，以prob=0.4的概率加到数据中 其余的保持默认即可
+      corrupt_list: resource/corruption.list
+      num_corrupt: 1
+      sampler: uniform
+      prob: 0.4
+      sampler_config:
+        low: 0.1
+        high: 0.9
+    concat_feats: True # 保持默认～
+    rirs_list: resource/rirs.list # 加混响用的inpulse 信号
+    wav_augment: # wav_aug 加混响，这里和none_target_corrupition之间在形式有点耦合，即：none_target_corruption应该在wav_augment下，这是历史遗留问题，程序内部不冲突，先这么用吧
+      rirs_prob: 0.3 # 以30%的概率加混响
+    mix_config: # Mix-Triang 中的self corruption用到的参数
+      mean_dur: 'max'
+    trim_config: # 裁剪 trim_type保持默认，还有其他的裁剪方式，这里用不到，win_len就是长度，默认裁剪成1s的语音
+      trim_type: raw
+      win_len: 1
+      dither: True # 裁剪的时候，随机往前挪0.1秒
+  num_worker: 8 # data loader用几个worker 实际的worker数是num_worker * num_gpu
+  keyword_config: # 保持默认
+    format: fix
+  fetch_key: mixspeech,speech,mix_keyword,ratios # 保持默认
+  batch_size: 512 #batch size
+  data_list: resource/mute.train.list # training data list
+  valid_list: resource/mute.valid.list # valid data list
+
+test_data_config: # test 相关的config 这个基本也弃用了，暂时先留着
+  <<: *base_data_config
+  fetch_key: key,sph,word_keyword
+  acc_data_list: data/GSC/test/clean.datalist
+  ckpt: exp/CNNGSC/CNNGSC_100.pt
+  batch_size: 40
+  result_key: det_result, sample
+  result_path: ""

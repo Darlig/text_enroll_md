@@ -1,0 +1,19 @@
+data_type: raw
+feats_type: fbank
+feats_config: !include config/feats_config/fbank.yaml
+self_corruption:
+  num_corrupt: 1
+  prob: 0.65
+  sampler: uniform
+  sampler_config:
+    low: 0.2
+    high: 0.9
+none_target_corruption:
+  corrupt_list: noise.50.list 
+  prob: 0.5
+  num_corrupt: 1
+  sampler: uniform
+  sampler_config:
+    low: 0.2
+    high: 0.9
+rirs_list: rirs.scp

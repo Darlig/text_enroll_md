@@ -1,0 +1,64 @@
+data_config:
+  batch_size: 256
+  data_list: resource/fenyinta//datalist.txt
+  epoch: 50
+  fetch_key: mixspeech,speech,word_keyword,ratio
+  keyword_config: &id001
+    format: fix
+  shuffle: true
+  sph_config: &id002
+    concat_feats: true
+    data_type: raw
+    feats_config:
+      frame_length: 25
+      frame_shift: 10
+      num_mel_bins: 80
+    feats_type: fbank
+    none_target_corruption:
+      corrupt_list: resource/LargeData/corrupt_wav.list
+      num_corrupt: 1
+      sampler: uniform
+      sampler_config:
+        high: 0.9
+        low: 0.1
+    self_corruption:
+      num_corrupt: 1
+      sampler: uniform
+      sampler_config:
+        high: 0.9
+        low: 0.1
+    trim_config:
+      trim_dither: true
+      win_len: 1
+  start_epoch: 0
+  valid_list: ''
+exp_config:
+  exp_dir: exp/FineTune/
+  exp_name: EfficientNetB0
+  finetune:
+    trained_ckpt: resource/PreTrainModel/EfficientNetB0_avg.pt
+  log_config:
+    filemode: a
+    format: '%(asctime)s: %(message)s'
+    level: INFO
+  log_interval: 5
+  optim_config:
+    lr: 0.001
+  valid_interval: 100
+model_arch: EfficientNet
+model_config:
+  loss: bce
+  model_name: efficientnet-b0
+  mt: true
+  num_classes: ''
+  task: hard_mixup
+test_data_config:
+  batch_size: 256
+  data_list: resource/LargeData/fix_keyword_datalist_train.txt
+  epoch: 50
+  fetch_key: key,sph,word_keyword
+  keyword_config: *id001
+  shuffle: true
+  sph_config: *id002
+  start_epoch: 0
+  valid_list: resource/LargeData/fix_keyword_datalist_valid.txt

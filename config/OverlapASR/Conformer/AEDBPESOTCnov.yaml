@@ -1,0 +1,86 @@
+# model archive
+model_arch: AEDASR
+
+# model config
+model_config:
+  audio_net_config:
+    input_trans: &linear_common
+      dim: [256, 256]
+      num_block: 1
+      norm: LayerNorm
+      act: ReLU
+    transformer_config: 
+      size: 256
+      self_att: MultiHeadAtt
+      self_att_config: &att_common
+        n_head: 4
+        n_feats: 256
+      cross_att: MultiHeadCrossAtt
+      corss_att_config: 
+        n_head: 1
+        n_feats: 256
+        norm: LayerNorm
+      feed_forward_config: &feed_forward_common
+        dim: [256, 2048, 256]
+        num_block: 1
+        norm: LayerNorm
+        act: ReLU
+      conv_config:
+        channels: 256
+
+  decoder_net_config:
+    num_bpe_token: 5004
+    input_trans: 
+      dim: 256
+      num_block: 1
+      norm: LayerNorm
+      act: ReLU
+    transformer_config:
+      size: 256
+      self_att: MultiHeadAtt
+      self_att_config: *att_common
+      cross_att: MultiHeadCrossAtt
+      corss_att_config: 
+        n_head: 1
+        n_feats: 256
+        norm: LayerNorm
+      feed_forward_config: *feed_forward_common
+  num_audio_block: 12
+  sos: 2
+  eos: 5003
+  num_doecoder_block: 4
+  loss_weight: [0.3, 0.1, 0.3]
+
+# experimental config
+exp_config:
+  trained_ckpt: ""
+  exp_dir: exp/conformer_aed_sot
+  warm_up_peak_epoch: 10
+  exp_name: kwatt_asr
+  optim_config:
+    lr: 0.001
+  log_config:
+    level: "INFO"
+    filemode: "a"
+    format:  "%(asctime)s: %(message)s"
+  log_interval: 5
+  valid_interval: 100
+
+# data config
+data_config: &base_data_config
+  epoch: 200
+  start_epoch: 0
+  shuffle: True
+  num_worker: 15
+  sph_config: !include config/base_config/self_corrupt_mix.yaml
+  sot_config:
+    special_token:
+      sc: 5002
+
+  length_key: mixspeech,speech,keyword
+  fetch_key: mixspeech,mixspeech_len,bpe_label,bpe_label_len
+  batch_size: 48
+  #data_list: resource/datalist.train.txt.new
+  data_list: /work102/shiying/work/spl_bpe_aed/resource/200k_data/datalist.train.txt
+  valid_list: /work102/shiying/work/spl_bpe_aed/resource/200k_data/datalist.valid.txt
+

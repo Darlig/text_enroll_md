@@ -362,37 +362,43 @@ class AEDKWSASRPhoneUnet(nn.Module):
 
     @torch.no_grad()
     def evaluate(self, input_data):
-        #sph_input, phn_label, kw_label, sph_len, phn_len, kw_len, target = input_data 
-        sph_input, sph_len, phn_label, phn_len, kw_label, kw_len = input_data
+        sph_input, sph_len, kw_label, kw_len = input_data
+        b,t,d = sph_input.size()
+        sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
+        sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
         sph_mask = ~NM.make_mask(sph_len).unsqueeze(1)
         kw_mask = ~NM.make_mask(kw_len).unsqueeze(1)
         cross_mask = ~NM.combine_mask(sph_mask.squeeze(1), kw_mask.squeeze(1), 1)
-        #print (sph_input.size(), phn_label.size(), kw_label.size(), sph_len.size(), phn_len.size(), kw_len.size(), target.size())
+
         # embedding
-        sph_emb = self.au_trans(sph_input)
-        phn_emb = self.word_emb(kw_label.to(torch.long))
-        phn_emb = self.kw_trans(phn_emb)
+        sph_emb = self.au_conv(sph_input.unsqueeze(1))
+        b, c, t, d = sph_emb.size()
+        sph_emb = self.au_conv_trans(sph_emb.transpose(1,2).contiguous().view(b, t, c * d))
+        sph_emb = self.au_trans(sph_emb)
+        kw_emb = self.phn_emb(kw_label.to(torch.long))
+        kw_emb = self.kw_trans(kw_emb)
 
         # add position embedding
         sph_emb = self.au_pos_emb(sph_emb)
-        phn_emb = self.kw_pos_emb(phn_emb)
+        kw_emb = self.kw_pos_emb(kw_emb)
 
-        phn_emb = self.forward_transformer(
+        kw_emb = self.forward_transformer(
             self.kw_transformer,
-            phn_emb,
+            kw_emb,
             mask=kw_mask,
         )
-        sph_emb, att_score = self.forward_transformer(
-            self.au_transformer,
-            sph_emb,
-            mask=sph_mask,
-            cross_embedding=(
-                phn_emb, phn_emb, cross_mask
-            ),
-            analyse=True
-        )
-        asr_loss, asr_hyp = self.asr_crit(
-            sph_emb, phn_label, sph_len, phn_len, return_hyp=True
-        )
-        kw_pos_mask = self.predict_kw_mask(asr_hyp.transpose(0,1))
-        return asr_hyp.transpose(0,1), sph_len, phn_label, att_score
+        sph_emb = self.forward_unet(sph_emb, mask=sph_mask, cross_embedding=(kw_emb, kw_emb, cross_mask))
+
+        #asr_hyp = self.bpe_asr_crit.get_hyp(sph_emb)
+        hyp = self.bpe_asr_crit.get_hyp(sph_emb)
+        scores, hyp = hyp.sort(descending=True)
+        hyp = hyp[:,:,0]
+        #bpe_ctc_loss, bpe_asr_hyp = self.bpe_asr_crit(
+        #    sph_emb, bpe_label, sph_len, bpe_label_len, return_hyp=True
+        #)
+
+        cross_context, corss_att = self.location_cross_att(kw_emb, sph_emb, sph_emb, mask=cross_mask.transpose(-2,-1))
+        det_result = self.det_net(cross_context[:,0,:])
+
+        # decoder output 
+        return det_result, hyp 

@@ -6,7 +6,7 @@ import torchaudio
 import torchaudio.compliance.kaldi as kaldi
 
 from yamlinclude import YamlIncludeConstructor
-from local.utils import compute_cer, make_dict_from_file
+from local.utils import make_dict_from_file
 from model import m_dict
 from torch.nn.utils.rnn import pad_sequence
 import matplotlib.pyplot as plt
@@ -164,7 +164,7 @@ def plot_roc(positive_result, utt2keyword_idx, negative_result):
 
 if __name__ == '__main__':
     
-    if os.path.isfile('./fenyinta_meta.pt'): 
+    if not os.path.isfile('./fenyinta_meta.pt'): 
         # 如果第一次做测试，需要将测试数据的一些信息存储在一个统一格式的文件fenyinta_meta.pt，方便后续测试
         # 直接使用
         make_fenyinta()

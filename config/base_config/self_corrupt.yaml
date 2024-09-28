@@ -1,0 +1,22 @@
+data_type: raw
+feats_type: fbank
+feats_config: !include config/feats_config/fbank.yaml
+self_corruption:
+  num_corrupt: 1
+  sampler: uniform
+  sampler_config:
+    low: 0.1
+    high: 0.9
+  #shift_prob: 0.35
+  #shift_type: mid
+#none_target_corruption: 
+#  corrupt_list: data/aishell_dt1.1_dt1.7/raw/corrupt_wav.list 
+#  num_corrupt: 1
+#  sampler: uniform
+#  sampler_config:
+#    low: 0.1
+#    high: 0.9
+#concat_feats: True
+#trim_config:
+#  win_len: 1
+#  trim_dither: True 

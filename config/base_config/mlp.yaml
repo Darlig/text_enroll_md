@@ -1,0 +1,5 @@
+#num_mlp_block: 2
+mlp_module:
+  dim: 256
+  norm: 'LayerNorm'
+  norm_before: False

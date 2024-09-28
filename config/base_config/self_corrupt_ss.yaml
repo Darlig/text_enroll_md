@@ -1,0 +1,18 @@
+data_type: raw
+feats_type: mel_spec
+feats_config: !include config/feats_config/mel_spec.yaml
+self_corruption:
+  num_corrupt: 1
+  sampler: uniform
+  sampler_config:
+    low: 0.3
+    high: 0.9
+mix_config:
+  mean_dur: 'max'
+return_raw: True
+snipe_edge:
+  hop_length: 160
+trim_config:
+  trim_type: completetrim
+  win_len: 10
+  #trim_dither: True 

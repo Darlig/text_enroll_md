@@ -1,0 +1,13 @@
+data_type: raw
+feats_type: fbank
+feats_config: !include config/feats_config/fbank.yaml
+mix_config:
+  delay_prob: 1.2
+self_corruption:
+  prob: 0.5
+  random_num: True
+  num_corrupt: 2
+  sampler: uniform
+  sampler_config:
+    low: 0.1
+    high: 0.9

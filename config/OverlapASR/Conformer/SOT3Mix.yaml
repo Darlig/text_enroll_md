@@ -1,0 +1,97 @@
+# model archive
+model_arch: AEDASR
+
+# model config
+model_config:
+  audio_net_config:
+    input_trans: &linear_common
+      dim: [256, 256]
+      num_block: 1
+      norm: LayerNorm
+      act: ReLU
+    transformer_config: 
+      size: 256
+      self_att: MultiHeadAtt
+      self_att_config: &att_common
+        n_head: 4
+        n_feats: 256
+      cross_att: MultiHeadCrossAtt
+      corss_att_config: 
+        n_head: 1
+        n_feats: 256
+        norm: LayerNorm
+      feed_forward_config: &feed_forward_common
+        dim: [256, 2048, 256]
+        num_block: 1
+        norm: LayerNorm
+        act: ReLU
+      conv_config:
+        channels: 256
+
+  kw_net_config:
+    #num_token: 31 # letter 1-26 special token ' and tow keyword pos_token 28, 29, 30 for unknown
+    num_bpe_token: 5004 # 0;1: blank; phone: 1,69;71 special token [71,72];73, sos/eos 73,74;75
+    input_trans: 
+      dim: 256
+      num_block: 1
+      norm: LayerNorm
+      act: ReLU
+    transformer_config:
+      size: 256
+      self_att: MultiHeadAtt
+      self_att_config: *att_common
+      feed_forward_config: *feed_forward_common
+  decoder_net_config:
+    num_bpe_token: 5004
+    input_trans: 
+      dim: 256
+      num_block: 1
+      norm: LayerNorm
+      act: ReLU
+    transformer_config:
+      size: 256
+      self_att: MultiHeadAtt
+      self_att_config: *att_common
+      cross_att: MultiHeadCrossAtt
+      corss_att_config: 
+        n_head: 1
+        n_feats: 256
+        norm: LayerNorm
+      feed_forward_config: *feed_forward_common
+  num_audio_block: 9
+  num_kw_block: 4
+  sos: 2
+  eos: 5002
+  sc: 5003
+  num_doecoder_block: 4
+  ctc_weight: 0
+
+# experimental config
+exp_config:
+  trained_ckpt: ""
+  exp_dir: exp/sot_3mix
+  warm_up_peak_epoch: 10
+  exp_name: sot_aed_asr
+  optim_config:
+    lr: 0.001
+  log_config:
+    level: "INFO"
+    filemode: "a"
+    format:  "%(asctime)s: %(message)s"
+  log_interval: 5
+  valid_interval: 100
+
+# data config
+data_config: &base_data_config
+  epoch: 200
+  start_epoch: 0
+  shuffle: True
+  num_worker: 18
+  sph_config: !include config/base_config/self_corrupt_3mix_delay.yaml
+  text_config:
+    sc_token: 5003
+  fetch_key: mixspeech,mixspeech_len,fifo_label,fifo_label_len
+  batch_size: 3
+  data_list: new.list
+  valid_list: new.list
+

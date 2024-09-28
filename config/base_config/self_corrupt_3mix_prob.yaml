@@ -1,0 +1,26 @@
+data_type: raw
+feats_type: fbank
+feats_config: !include config/feats_config/fbank.yaml
+return_raw_wav: True
+self_corruption:
+  prob: 0.8
+  num_corrupt: 2
+  sampler: uniform
+  sampler_config:
+    low: 0.1
+    high: 0.9
+#none_target_corruption:
+#  prob: 0.5
+#  corrupt_list: ../../data/noise/demand/wav.scp
+#  random_num: True
+#  num_corrupt: 2
+#  sampler: uniform
+#  sampler_config:
+#    low: 0.8
+#    high: 0.9
+#rirs:
+#  rirs_list: /Users/shiying/Research/zeus_dev/overlap_asr/rirs_list.txt
+#  rirs_prob: 1.4
+#wav_augment:
+#  speed_perturb:
+#    factors: [0.9]

@@ -1,0 +1,21 @@
+data_type: raw
+feats_type: fbank
+feats_config: !include config/feats_config/fbank.yaml
+self_corruption:
+  num_corrupt: 1
+  prob: 0.65
+  sampler: uniform
+  sampler_config:
+    low: 0.4
+    high: 0.9
+none_target_corruption: 
+  corrupt_list: /Users/shiying/Research/zeus_dev/conditional_chain_asr/debug_dir/noise.scp
+  prob: 1
+  num_corrupt: 1
+  sampler: uniform
+  sampler_config:
+    low: 0.3
+    high: 0.7
+rirs:
+  rirs_prob: 0.4
+rirs_list: /Users/shiying/Research/zeus_dev/conditional_chain_asr/debug_dir/rirs.scp

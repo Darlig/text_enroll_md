@@ -1,0 +1,7 @@
+num_mel_bins: 23
+num_ceps: 13
+frame_length: 25
+frame_shift: 10
+dither: 0.1
+energy_floor: 0.0
+low_freq: 20

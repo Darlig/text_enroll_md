@@ -1,0 +1,10 @@
+data_type: raw
+feats_type: fbank
+feats_config: !include config/feats_config/fbank.yaml
+none_target_corruption: 
+  corrupt_list: /work104/shiying/data/LibriSpeech/train.corrupt.list.for.GSC
+  num_corrupt: 1
+  sampler: uniform
+  sampler_config:
+    low: 0.1
+    high: 0.9

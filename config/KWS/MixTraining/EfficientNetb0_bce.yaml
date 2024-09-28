@@ -1,0 +1,41 @@
+# model archive
+model_arch: EfficientNet
+
+# model config
+model_config:
+  model_name: 'efficientnet-b0'
+  num_classes: 2861
+  loss: 'bce'
+  task: 'hard_mixup'
+  mt: True
+
+# experimental config
+exp_config:
+  exp_dir: exp/MixTraningN_EfficientB0
+  exp_name: EfficientNetB0
+  optim_config:
+    lr: 0.001
+  log_config:
+    level: "INFO"
+    filemode: "a"
+    format:  "%(asctime)s: %(message)s"
+  log_interval: 5
+  valid_interval: 100
+
+# data config
+data_config: &base_data_config
+  epoch: 50
+  start_epoch: 0
+  shuffle: True
+  sph_config: !include config/base_config/self_corrupt_with_aug.yaml 
+  keyword_config:
+    format: fix
+  fetch_key: mixspeech,speech,word_keyword,ratio
+  batch_size: 256
+  data_list: resource/LargeData/fix_keyword_datalist_train.txt
+  valid_list: resource/LargeData/fix_keyword_datalist_valid.txt
+
+test_data_config:
+  <<: *base_data_config
+  fetch_key: key,sph,word_keyword
+  batch_size: 256

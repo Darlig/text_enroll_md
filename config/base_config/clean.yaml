@@ -1,9 +1,0 @@
-data_type: raw
-feats_type: fbank
-feats_config: !include config/feats_config/fbank.yaml
-wav_augment:
-  volume:
-    sampler: uniform
-    config:
-      low: 0.1
-      high: 1

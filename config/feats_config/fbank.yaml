@@ -1,4 +1,0 @@
-num_mel_bins: 40
-frame_length: 25
-frame_shift: 10
-#dither: 0.1

@@ -8,14 +8,14 @@ self_corruption:
   sampler_config:
     low: 0.4
     high: 0.9
-none_target_corruption: 
-  corrupt_list: /Users/shiying/Research/zeus_dev/conditional_chain_asr/debug_dir/noise.scp
-  prob: 1
-  num_corrupt: 1
-  sampler: uniform
-  sampler_config:
-    low: 0.3
-    high: 0.7
+#none_target_corruption: 
+#  corrupt_list: aishell_ke_data/noise.cutted.scp
+#  prob: 1
+#  num_corrupt: 1
+#  sampler: uniform
+#  sampler_config:
+#    low: 0.3
+#    high: 0.7
 rirs:
   rirs_prob: 0.4
-rirs_list: /Users/shiying/Research/zeus_dev/conditional_chain_asr/debug_dir/rirs.scp
+rirs_list: aishell_ke_data/remove_bad.scp

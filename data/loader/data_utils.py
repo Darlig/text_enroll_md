@@ -72,21 +72,37 @@ def tensor2str(t: torch.Tensor):
 
 def substitution_neg(positive_keyword: List[int], negative_keyword: List[int]) -> List[int]:
     n_sub = 1
-    if len(positive_keyword) > 4:
+    if len(positive_keyword) > 3:
         n_sub = random.randint(2, len(positive_keyword)-1)
     positive_idx = [x for x in range(len(positive_keyword))] 
     sub_idx = random.sample(positive_idx, k=n_sub)
-    keyword = [
-        positive_keyword[x] if x not in sub_idx else random.choice(negative_keyword) 
-        for x in range(len(positive_idx))
-    ]
+    keyword = []
+    for x, one_word in enumerate(positive_keyword):
+        if x not in sub_idx:
+            keyword.append(one_word)
+        else:
+            one_sub_word = copy.deepcopy(one_word)
+            sample_times = 0
+            while (one_sub_word == one_word):
+                one_sub_word = random.choice(negative_keyword)
+                sample_times += 1
+                if sample_times > 10:
+                    break
+            if sample_times > 10:
+                continue
+            else:
+                keyword.append(one_sub_word)
+    #candidate_neg = [n for n in negative_keyword if n not in positive_keyword]
+    #keyword = [
+    #    positive_keyword[x] if x not in sub_idx else random.choice(candidate_neg) 
+    #    for x in range(len(positive_idx))
+    #]
     return keyword
 
 def deletion_neg(positive_keyword: List[int], negative_keyword: List[int]) -> List[int]:
     n_del = 1
-    if len(positive_keyword) > 4:
+    if len(positive_keyword) > 3:
         n_del = 2
-    n_del = random.randint(1, len(positive_keyword)-1)
     positive_idx = [x for x in range(len(positive_keyword))] 
     del_idx = random.sample(positive_idx, k=n_del)
     keyword = [positive_keyword[x]  for x in range(len(positive_keyword)) if x not in del_idx]
@@ -94,7 +110,7 @@ def deletion_neg(positive_keyword: List[int], negative_keyword: List[int]) -> Li
 
 def insertion_neg(positive_keyword: List[int], negative_keyword: List[int]) -> List[int]:
     n_insert = 1
-    if len(positive_keyword) > 4:
+    if len(positive_keyword) > 3:
         n_insert = 2
     positive_idx = [x for x in range(len(positive_keyword))] 
     insert_idx = random.sample(positive_idx, k=n_insert)
@@ -107,7 +123,20 @@ def insertion_neg(positive_keyword: List[int], negative_keyword: List[int]) -> L
 
 def shuffle_neg(positive_keyword: List[int], negative_keyword: List[int]) -> List[int]:
     keyword = positive_keyword[:]
-    random.shuffle(keyword)
+    if len(positive_keyword) == 2:
+        if positive_keyword[1] != positive_keyword[0]:
+            keyword = [positive_keyword[1], positive_keyword[0]]
+        else:
+            keyword = negative_keyword[:]
+    else:
+        shuffle_times = 0 
+        while keyword == positive_keyword:
+            shuffle_times += 1
+            random.shuffle(keyword)
+            if shuffle_times > 10:
+                break
+        if shuffle_times > 10:
+            keyword = negative_keyword[:]
     return keyword
 
 def full_neg(positive_keyword: List[int], negative_keyword: List[int]) -> List[int]:
@@ -265,7 +294,7 @@ def reverb_aug(waveform: torch.Tensor, config: Dict, rirs: str=None) -> torch.Te
     return waveform
 
 def add_noise(speech: torch.Tensor, noise: torch.Tensor)->Tuple[torch.Tensor, torch.Tensor]:
-    snr = random.randint(1, 10)
+    snr = random.randint(3, 10)
     signal_power = (speech**2).mean()
     noise_power = (noise**2).mean()
 
@@ -309,7 +338,9 @@ def make_mix_wav(
     if len(noise) > 0:
         noise = sum(noise)
         mix_wav, noise = add_noise(mix_wav, noise) # Signal power is temporary set to SNR=1~10dB
-    wav_group = scaled_wav + [noise]
+        wav_group = scaled_wav + [noise]
+    else:
+        wav_group = scaled_wav[:]
     mix_wav = torch.clamp(mix_wav, -1.0, 1.0)
 
     return [mix_wav] + wav_group
@@ -553,7 +584,10 @@ def make_keyword(
         positive_keyword = keyword[:]
         positive_label = candidate_seq + corrupt_label if corrupt_label else candidate_seq
         full_neg_keyword = random_one_neg(negative_seq, neg_len, positive_label)
-        neg_func_idx = random.randint(0,4)
+        if len(positive_keyword) >= 2:
+            neg_func_idx = random.randint(0,4)
+        else:
+            neg_func_idx = 4
         keyword = NEG_FAMILY[neg_func_idx](positive_keyword, full_neg_keyword)
         keyword_pos = -1
         pos = False

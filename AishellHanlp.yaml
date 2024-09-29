@@ -65,7 +65,7 @@ exp_config:
 # data config
 data_config: &base_data_config
   epoch: 250
-  start_epoch: 0
+  start_epoch: 33
   shuffle: True
   num_worker: 18
   sph_config: !include config/base_config/self_corrupt_none_target_corrupt.yaml
@@ -83,7 +83,7 @@ data_config: &base_data_config
         with_trans: True
   length_key: mixspeech,speech,keyword
   fetch_key: mixspeech,mixspeech_len,phn_label,phn_label_len,keyword,keyword_len,bpe_label,bpe_label_len,target
-  batch_size: 60
-  data_list: datalist.500.txt
-  valid_list: datalist.500.txt
+  batch_size: 80
+  data_list: hanlp_data_list/datalist.train.list
+  valid_list: hanlp_data_list/datalist.valid.list
 

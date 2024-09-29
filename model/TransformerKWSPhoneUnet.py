@@ -92,7 +92,6 @@ class TransformerKWSPhoneUnet(nn.Module):
 
         # vocab config
         kw_input_trans_config = kw_net_config['input_trans']
-        num_bpe_token = kw_net_config['num_bpe_token']
         num_phn_token = kw_net_config['num_phn_token']
         kw_transformer_config = kw_net_config['transformer_config']
         kw_self_att = att_dict[kw_transformer_config['self_att']]

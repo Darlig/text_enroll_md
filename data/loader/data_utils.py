@@ -74,6 +74,8 @@ def substitution_neg(positive_keyword: List[int], negative_keyword: List[int]) -
     n_sub = 1
     if len(positive_keyword) > 3:
         n_sub = random.randint(2, len(positive_keyword)-1)
+    positive_keyword = unfold_list(positive_keyword)
+    negative_keyword = unfold_list(negative_keyword)
     positive_idx = [x for x in range(len(positive_keyword))] 
     sub_idx = random.sample(positive_idx, k=n_sub)
     keyword = []
@@ -103,7 +105,8 @@ def deletion_neg(positive_keyword: List[int], negative_keyword: List[int]) -> Li
     n_del = 1
     if len(positive_keyword) > 3:
         n_del = 2
-    positive_idx = [x for x in range(len(positive_keyword))] 
+    positive_keyword = unfold_list(positive_keyword)
+    positive_idx = [x for x in range(1, len(positive_keyword)-1)] 
     del_idx = random.sample(positive_idx, k=n_del)
     keyword = [positive_keyword[x]  for x in range(len(positive_keyword)) if x not in del_idx]
     return keyword
@@ -122,6 +125,8 @@ def insertion_neg(positive_keyword: List[int], negative_keyword: List[int]) -> L
     return keyword
 
 def shuffle_neg(positive_keyword: List[int], negative_keyword: List[int]) -> List[int]:
+    positive_keyword = unfold_list(positive_keyword)
+    negative_keyword = unfold_list(negative_keyword)
     keyword = positive_keyword[:]
     if len(positive_keyword) == 2:
         if positive_keyword[1] != positive_keyword[0]:
@@ -141,6 +146,7 @@ def shuffle_neg(positive_keyword: List[int], negative_keyword: List[int]) -> Lis
 
 def full_neg(positive_keyword: List[int], negative_keyword: List[int]) -> List[int]:
     return negative_keyword
+
 NEG_FAMILY = {0: substitution_neg, 1: deletion_neg, 2: insertion_neg, 3: shuffle_neg, 4: full_neg}
 
 

@@ -1,5 +1,5 @@
 # model archive
-model_arch: AEDKWSASRPhoneUnet
+model_arch: TransformerKWSPhone
 
 # model config
 model_config:
@@ -68,7 +68,7 @@ model_config:
 # experimental config
 exp_config:
   trained_ckpt: ""
-  exp_dir: exp/aishell_ke_hanlp_u_transformer
+  exp_dir: exp/aishell_ke_hanlp_transformer_cross_4_layer
   warm_up_peak_epoch: 5
   exp_name: kwatt_asr
   optim_config:
@@ -100,7 +100,7 @@ data_config: &base_data_config
         punk: 174
         with_trans: True
   length_key: mixspeech,speech,keyword
-  fetch_key: mixspeech,mixspeech_len,phn_label,phn_label_len,keyword,keyword_len,bpe_label,bpe_label_len,target
+  fetch_key: mixspeech,mixspeech_len,phn_label,phn_label_len,keyword,keyword_len,target
   batch_size: 60
   data_list: datalist.500.txt
   valid_list: datalist.500.txt

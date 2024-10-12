@@ -7,6 +7,8 @@ import numpy as np
 import soundfile as sf
 import matplotlib.pyplot as plt
 from torch.optim.lr_scheduler import _LRScheduler
+from torchmetrics.functional.text.helper import _edit_distance
+
 
 
 log_level = {
@@ -24,8 +26,18 @@ def isdigit(string):
         result = bool(pattern.match(string))
     return result
 
-def beam_search(hyp, beam_size):
-    pass
+
+def compute_cer(hyp, ref, detail=False):
+    if isinstance(hyp, torch.Tensor):
+        hyp = list(hyp.numpy().tolist())
+    if isinstance(ref, torch.Tensor):
+        ref = list(ref.numpy().tolist())
+    n_error = _edit_distance(hyp, ref)
+    if detail:
+        return n_error, len(ref), float(n_error) / len(ref)
+    else:
+        return float(n_error) / len(ref)
+
 
 def compute_eer_skleanr(y_true, y_score):
 
@@ -122,25 +134,6 @@ def plot_weight(writer):
                 },
                 global_step=i
             )
-
-def trim_wav(
-    wavf, 
-    head, 
-    tail,
-    sr=16000,
-    save_path=None
-):
-    # use to trim wav to check the speech content
-    wav,_ = sf.read(wavf)
-    sample_per_frame = sr / 100
-    head_anchor = int(head * sample_per_frame)
-    tail_anchor = int(tail * sample_per_frame)
-    trim_wav = wav[head_anchor: tail_anchor]
-    if save_path != None:
-        sf.write(save_path, trim_wav, samplerate=sr) 
-        return 1
-    else:
-        return trim_wav
 
 def vinterplate(matrix, deep=4):
     # visualize fbank feats interpalte it to a larger size
@@ -270,22 +263,37 @@ def make_lexicon(phones='data/txt/phones.txt'):
     return pdict
 
 # make dict
-def make_dict_from_file(files):
+def make_dict_from_file(files, vtype=str):
     rdict = {}
     with open(files) as f:
         for line in f.readlines():
-            k,v = line.strip().split(" ", maxsplit=1)
+            line = line.strip()
+            line = line.split(" ", maxsplit=1)
+            if len(line) > 1:
+                k,v = line
+            else:
+                k = line[0]
+                v = ""
             rdict[k] = v
+    try:
+        rdict = {k:vtype(v) for k,v in rdict.items()}
+    except:
+        raise TypeError('Un-support type {}'.format(vtype))
     return rdict
 
 # remove duplicates and blank for one sequence(CTC decode)
-def remove_duplicates_and_blank(hyp, blank_id=0):
+def remove_duplicates_and_blank(hyp, blank_id=0, other_special=None):
     if isinstance(hyp, torch.Tensor):
         hyp = [x.item() for x in hyp]
+    remove_token = [blank_id]
+    if other_special:
+        assert isinstance(other_special, list)
+        remove_token += other_special
     new_hyp = []
     cur = 0
     while cur < len(hyp):
-        if hyp[cur] != blank_id:
+        #if hyp[cur] != blank_id:
+        if hyp[cur] not in remove_token:
             new_hyp.append(hyp[cur])
         prev = cur
         while cur < len(hyp) and hyp[cur] == hyp[prev]:

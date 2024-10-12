@@ -5,6 +5,7 @@ import torch
 import torchaudio
 import json
 import copy
+import itertools
 
 import data.loader.kaldi_io as kaldi_io
 import torchaudio.compliance.kaldi as kaldi
@@ -43,6 +44,23 @@ def get_mel_scale(n_mels=80, sample_rate=16000, f_min=0, f_max=None, n_stft=201,
     )
     return filter_bank
 
+def permuate_labels(labels, conject_token=None):
+    ids = [x for x in range(len(labels))]
+    permuates = []
+    for one_idx in itertools.permutations(ids):
+        if conject_token:
+            one_per = [labels[x] + [conject_token] for x in one_idx]
+            one_per[-1] = one_per[-1][:-1]
+        else:
+            one_per = [labels[x] for x in one_idx]
+        permuates.append(one_per)
+
+    if len(permuates) < 6: # assume 3mix in data
+        pad_per = permuates[0]
+        for x in range(6-len(permuates)):
+            permuates.append(pad_per)
+    return permuates
+
 def mel_spectrum(
         waveform, 
         win_length=400, 
@@ -78,14 +96,21 @@ def mel_spectrum(
 NONE_TENSOR_KEY = [
     'wav', 'key', 'sph', 'corruption_material', 'segment', 'segment_idx',
     'n_scorrupt', 'n_ncorrupt', 'num_corrupt', 'rirs', 'neg_candidate',
-    'corrupt', 'self_corruption', 'none_target_corruption'
+    'corrupt', 'self_corruption', 'none_target_corruption', 'nframes', 'ref1', 'ref2', 'ref3', 'ref0'
 ]
-CTC_KEY = ['label', 'crpt_label'] # to be extended
+CTC_KEY = [
+    'label', 'crpt_label', 'phn_label', 'bpe_label', 'c_phn_label', 'c_bpe_label',
+    'c_bpe_label0','c_bpe_label', 'c_bpe_label1', 'c_bpe_label2',
+    'c_phn_label0', 'c_phn_label1','c_phn_label2', 'neg_label', 'fifo_label',
+    'per0', 'per1', 'per2', 'per3', 'per4', 'per5'
+
+] # to be extended
 
 
 # Pre-Defined Special Token
 TEXT_SPEC_TOKEN = {
-    'sos': None, 'eos': None, 'sok': None, 'eok': None, 'unk': None, 'with_trans': None
+    'sos': None, 'eos': None, 'sok': None, 'eok': None, 'unk': None, 'with_trans': None,
+    'psok': None, 'peok': None, 'punk': None
 }
 
 # input loader and feats extractor mapping
@@ -282,7 +307,7 @@ def wav_augment(waveform, config, rirs=None):
 
 
 # make mix wav
-def make_mix_wav(wavs, ratios, mean_dur='max', major=False, skip_idx=None):
+def make_mix_wav(wavs, ratios, mean_dur='max', major=False, skip_idx=None, delay_prob=0.35):
     if skip_idx != None:
         skip_feats = wavs[-skip_idx:]
         skip_ratios = ratios[-skip_idx:]
@@ -297,11 +322,15 @@ def make_mix_wav(wavs, ratios, mean_dur='max', major=False, skip_idx=None):
     max_rms = max(rms) # find the max energy
     
     # make wav delay
-    if random.randint(0, 10) // 2 == 0:
-        delay_idx = random.randint(0, len(wavs)-1)
-        delay_len =  random.randint(0, wavs[delay_idx].size(1)//3)
-        zero_padding = torch.zeros(1, delay_len)
-        wavs[delay_idx] = torch.cat([zero_padding, wavs[delay_idx]], dim=1)
+    #if random.randint(0, 10) % 3 == 0:
+    if (random.random() < delay_prob) and (len(wavs)>1):
+        for delay_idx in range(1, len(wavs)): # apply delay from the second wavform
+            if delay_idx == 1:
+                delay_len = random.randint(16000, 16000*3)
+            else:
+                delay_len = delay_len + random.randint(16000, 16000*3)
+            zero_padding = torch.zeros(1, delay_len)
+            wavs[delay_idx] = torch.cat([zero_padding, wavs[delay_idx]], dim=1)
 
     # compute wav size
     wav_size = [wav.size(1) for wav in wavs]
@@ -403,11 +432,11 @@ def make_corrupt_party(
     n = config.get('num_corrupt')
     if config.get('random_num', False):
         assert(n > 1)
-        n = RANDOM_FACTOR['int'](1, n+1)
-    if config.get('prob', 1.2) < 1:
-        dice = random.uniform(0,1)
-        if dice > config.get('prob'):
-            n = 0
+        n = RANDOM_FACTOR['int'](0, n+1)
+    #if config.get('prob', 1.2) < 1:
+    #    dice = random.uniform(0,1)
+    #    if dice > config.get('prob'):
+    #        n = 0
 
     sampler = config.get('sampler')
     assert (sampler in RANDOM_FACTOR.keys())
@@ -499,6 +528,8 @@ def make_segment(segments, win_len, trim_type='raw', dither=False, sample_rate=1
 # detach corruption
 def detach_corruption(material, segment_idx=None):
     keywords = [] 
+    phn_labels = []
+    bpe_labels = []
     labels = []
     for i, (_idx, info) in enumerate(material.items()):
         if 'word_keyword' in info:
@@ -511,37 +542,57 @@ def detach_corruption(material, segment_idx=None):
                 segment_head, segment_tail = segment_idx[i]
                 label = label[segment_head: segment_tail] 
             labels.append(label)
-    return keywords, labels
+        if 'phn_label' in info:
+            phn_label = info['phn_label']
+            if segment_idx != None:
+                segment_head, segment_tail = segment_idx[i]
+                phn_label = phn_label[segment_head: segment_tail] 
+            phn_labels.append(phn_label)
+        if 'bpe_label' in info:
+            bpe_label = info['bpe_label']
+            if segment_idx != None:
+                segment_head, segment_tail = segment_idx[i]
+                bpe_label = bpe_label[segment_head: segment_tail] 
+            bpe_labels.append(bpe_label)
+    return keywords, labels, phn_labels, bpe_labels
 
 # insert special token in label sequence such as SOS: 0(start of sentence) 
 # 1 2 3 4 5 -> "0" 1 2 3 4 5
 def inject_special_token(
-        keyword, keyword_length, label, 
-        positive=True, keyword_pos=None, special_token={}
+        keyword, keyword_length, label=None, 
+        positive=True, keyword_pos=None, special_token={}, bpe_label=None, bpe_candidate=None
     ):
     TEXT_SPEC_TOKEN.update(special_token)
-    tmp = copy.deepcopy(label)
-    new_label = copy.deepcopy(label)
+    new_phn_label = copy.deepcopy(label)
+    new_bpe_label = copy.deepcopy(bpe_label)
     new_keyword = copy.deepcopy(keyword)
-    if (not positive) and (TEXT_SPEC_TOKEN['unk'] != None):
-        new_label = torch.tensor([TEXT_SPEC_TOKEN['unk'] for x in range(len(new_label))])
+    if (not positive) and (TEXT_SPEC_TOKEN['punk'] != None):
+        new_phn_label = torch.tensor([TEXT_SPEC_TOKEN['punk'] for x in range(len(new_phn_label)//3)])
+        new_bpe_label = torch.tensor([TEXT_SPEC_TOKEN['unk']  for x in range(len(new_bpe_label)//3)])
 
     if TEXT_SPEC_TOKEN['sos'] != None: # start of sentence
-        new_label = [TEXT_SPEC_TOKEN['sos']] + new_label
+        new_phn_label = [TEXT_SPEC_TOKEN['sos']] + new_phn_label
         keyword_pos = keyword_pos + 1  if keyword_pos != None else keyword_pos # one token insert before the keyword
         
     if TEXT_SPEC_TOKEN['eos'] != None: # end of sentence
-        new_label = new_label + [TEXT_SPEC_TOKEN['eos']] 
+        new_phn_label = new_phn_label + [TEXT_SPEC_TOKEN['eos']] 
 
-    if TEXT_SPEC_TOKEN['sok'] != None: # start of keyword
-        new_keyword.insert(0, [TEXT_SPEC_TOKEN['sok']])
+    if TEXT_SPEC_TOKEN['psok'] != None: # start of keyword
+        new_keyword.insert(0, [TEXT_SPEC_TOKEN['psok']])
 
-    if TEXT_SPEC_TOKEN['eok'] != None: # end of keyword
-        new_keyword.insert(len(new_keyword), [TEXT_SPEC_TOKEN['eok']])
+    if TEXT_SPEC_TOKEN['peok'] != None: # end of keyword
+        new_keyword.insert(len(new_keyword), [TEXT_SPEC_TOKEN['peok']])
 
     if (TEXT_SPEC_TOKEN['with_trans']) and (positive): # modify keyword in label
-        new_label[keyword_pos: keyword_pos+keyword_length] = new_keyword
-    return new_keyword, new_label, keyword_pos
+        new_phn_label[keyword_pos: keyword_pos+keyword_length] = new_keyword
+        bpe_kw_head = bpe_candidate[keyword_pos]
+        bpe_kw_tail = bpe_candidate[keyword_pos+keyword_length]
+        bpe_kw = bpe_label[bpe_kw_head: bpe_kw_tail]
+        bpe_kw.insert(0, [TEXT_SPEC_TOKEN['sok']])
+        bpe_kw.insert(len(bpe_kw), [TEXT_SPEC_TOKEN['eok']])
+        new_bpe_label[bpe_kw_head: bpe_kw_tail] = bpe_kw
+
+    return new_keyword, new_phn_label, new_bpe_label, keyword_pos
 
 # snipe_edges for waveform
 def snipe_edge(waveform, hop_length=160):
@@ -617,42 +668,6 @@ def process_corruption(data, config, egs_format=False):
         })
         yield sample
 
-# NOTE: this function is Deprecated temporarly
-def process_corruption_dump(data, config):
-    for sample in data:
-        corruption_material = {}
-        corruption_ratios = []
-        num_corrupt = n_scorrupt = n_ncorrupt = 0
-        if config.get('self_corruption', False): # make self corruption materials
-            corrupt_list = config['s_corrupt_list']
-            corrupt_list_len = config['num_scorrupt_samples']
-            ratios, corruption_material, n_scorrupt = make_corrupt_party(
-                corrupt_list, corrupt_list_len, config['self_corruption'], corruption_material, 
-                detach_f=json.loads, 
-            )
-            corruption_ratios.extend(ratios)
-            num_corrupt += n_scorrupt
-        
-        if config.get('none_target_corruption', False): # make none target corruption materials
-            corrupt_list = config['n_corrupt_list']
-            corrupt_list_len = config['num_ncorrupt_samples']
-            ratios, corruption_material, n_ncorrupt = make_corrupt_party(
-                corrupt_list, corrupt_list_len, config['none_target_corruption'], corruption_material
-            )
-            corruption_ratios.extend(ratios)
-            num_corrupt += n_ncorrupt
-
-        # save the metarial into sample dict
-        sample.update({
-            'corruption_ratios': corruption_ratios,
-            'corruption_material': corruption_material,
-            'n_scorrupt': n_scorrupt,
-            'n_ncorrupt': n_ncorrupt,
-            'num_corrupt': num_corrupt,
-        })
-        yield sample
-
-
 # process speech feats
 # load wav -> corrupt wav -> destroy a positive sample to negative (made for FA) -> extract fbank
 # NOTE: this function can support load kaldi ark feats, torch pt file and read wavefrom from raw wav file
@@ -682,24 +697,10 @@ def process_speech_feats(data, config, egs_format=False):
         if config.get('wav_augment', False):
             if 'rirs' in sample:
                 rirs_src = sample['rirs']
+            else:
+                rirs_src = None
             feats = [wav_augment(f, config.get('wav_augment'), rirs_src) for f in feats]
 
-        # mask half of a audio waveforme such as: 1 2 3 4 5 6 -> 0 0 0 4 5 6 
-        # the mask time index is according to energy and the masked sample will convert to a negative sample
-        if config.get('destroy_aug', False):
-            destroy_prob = config['destroy_aug'].get('prob', 0.4)
-            destroy_class = config['destroy_aug'].get('destroy_class', 3)
-            dice = random.randint(0,100)
-            if dice < destroy_prob * 100:
-                destroy_feats = feats[0]
-                max_energy_idx = max_energy(feats[0])
-                if dice % 2 == 0:
-                    destroy_feats[:,0:max_energy_idx] *= 0
-                else:
-                    destroy_feats[:,max_energy_idx:] *= 0
-                feats[0] = destroy_feats
-                sample.update({'word_keyword': [destroy_class]})
-            
         # Trim wav according to segment 
         if config.get('trim_config', False):
             if 'segment' in sample:
@@ -740,9 +741,24 @@ def process_speech_feats(data, config, egs_format=False):
             feats = [snipe_edge(f, hop_length) for f in feats]
         
         if config.get('return_raw', False):
-            raw_feats = copy.deepcopy(feats)
-            sample.update({'raw_wav': raw_feats[1].squeeze(0)}) # only keep the target speech
+            if 'corruption_material' in sample:
+                raw_feats = copy.deepcopy(feats[1])
+            else:
+                raw_feats = copy.deepcopy(feats[0])
+            sample.update({'raw_wav': raw_feats.squeeze(0)}) # only keep the target speech
         
+        if config.get('random_raw', False):
+            sample_len1 = feats[1].size(1)
+            dur = 16000 * 4 
+            sample_head = random.randint(0, sample_len1-dur-1) if sample_len1 > dur else 0
+            raw_wav1 = copy.deepcopy(feats[1][:, sample_head:sample_head+dur])
+            sample.update({'raw_wav1': raw_wav1.squeeze(0)})  
+
+            sample_len2 = feats[2].size(1)
+            dur = 16000 * 4 
+            sample_head = random.randint(0, sample_len2-dur-1) if sample_len2 > dur else 0
+            raw_wav2 = copy.deepcopy(feats[2][:, sample_head:sample_head+dur])
+            sample.update({'raw_wav2': raw_wav2.squeeze(0)})  
         # Extract feature: MFCC / FBANK 
         feats_type = config.get('feats_type', 'fbank')
         feats_config = config.get('feats_config', FBANK_DEFAULT_SETTING)
@@ -793,8 +809,12 @@ def process_speech_feats(data, config, egs_format=False):
 # Process text feats, mainly deal with segment:
 # e.g. in process_speech_feats wav has been trimed by segment, and the text label will 
 # be cutted in this function acorrding to segment also.
-def process_text_feats(data, id2k=None):
+def process_text_feats(data, neg_token=None, sc_token=None):
     for sample in data:
+        if 'bpe_label' in sample:
+            feak_pad_label = sample['bpe_label'] if not neg_token else neg_token
+        else:
+            feak_pad_label = [0]
         if ('label' in sample) and ('segment_idx' in sample):
             label = sample['label']
             segment_idx = sample['segment_idx']
@@ -803,15 +823,44 @@ def process_text_feats(data, id2k=None):
             sample.update({'label': label})
         
         if 'corruption_material' in sample:
+            if sc_token:
+                fifo_label = sample['bpe_label']
             if 'segment_idx' in sample:
                 c_segment_idx = sample['segment_idx'][1:]
             else:
                 c_segment_idx = None
-            c_keyword, c_label = detach_corruption(sample['corruption_material'], c_segment_idx)
+            c_keyword, c_label, c_phn_label, c_bpe_label = detach_corruption(sample['corruption_material'], c_segment_idx)
+
             if len(c_keyword) != 0:
                 sample.update({"mix_keyword": sample['word_keyword']+unfold_list(c_keyword)})
             if len(c_label) != 0:
                 sample.update({"crpt_label": c_label})
+
+            if len(c_phn_label) != 0:
+                for x in range(len(c_phn_label)):
+                    sample.update({"c_phn_label{}".format(x): c_phn_label})
+            
+            if len(c_bpe_label) != 0:
+                n_label = 1 + len(c_bpe_label)
+                for x in range(len(c_bpe_label)):
+                    sample.update({"c_bpe_label{}".format(x): c_bpe_label[x]})
+                    feak_pad_label = c_bpe_label[x] if not neg_token else neg_token
+                    if sc_token:
+                        fifo_label = fifo_label + [sc_token] + c_bpe_label[x]
+            else:
+                n_label = 1
+            
+            #TODO: assume max mix is 3
+            label_mask = [0 for x in range(n_label)]
+            n_pad_label = 2 - len(c_bpe_label)
+            for x in range(n_pad_label):
+                sample.update({"c_bpe_label{}".format(x+len(c_bpe_label)): feak_pad_label})
+                sample.update({"c_phn_label{}".format(x+len(c_phn_label)): feak_pad_label})
+                label_mask  = label_mask + [1]
+            if sc_token:
+                sample.update({'fifo_label': copy.deepcopy(fifo_label)})
+            sample.update({'n_label': n_label})
+            sample.update({'label_mask': label_mask})
         yield sample
 
 
@@ -823,23 +872,105 @@ def process_sampled_keyword_from_label(
     # sos: start of setence, eos: end of setence, sok: start of keyword, eok, end of keyword, unk: unknow token
     TEXT_SPEC_TOKEN.update(special_token)
     for sample in data:
-        new_label = sample['label']
+        new_phn_label = copy.deepcopy(sample['phn_label'])
+        new_bpe_label = copy.deepcopy(sample['bpe_label'])
+        bpe_candidate = copy.deepcopy(sample['b_kw_candidate'])
         kw, kw_pos, kw_length, pos, target = make_keyword(sample, positive_prob, neg_len=neg_len)
-        kw, new_label, kw_pos = inject_special_token(
-            keyword=kw, keyword_length=kw_length, positive=pos, label=new_label, 
-            keyword_pos=kw_pos, special_token=special_token
+        kw, new_phn_label, new_bpe_label, kw_pos = inject_special_token(
+            keyword=kw, keyword_length=kw_length, positive=pos, label=new_phn_label, 
+            keyword_pos=kw_pos, special_token=special_token,  bpe_label=new_bpe_label, bpe_candidate=bpe_candidate
         )
 
-        sample.update({'keyword': kw, 'label': new_label, 'target': target}) 
+        sample.update({'keyword': kw, 'phn_label': new_phn_label, 'bpe_label': new_bpe_label, 'target': target}) 
+        yield sample
+
+# process permuate label
+def process_permuate_label(data, sc_token=None):
+    for sample in data:
+        labels = []
+        labels.append(copy.deepcopy(sample['bpe_label']))
+        for x in range(1, sample['n_label']):
+            labels.append(sample['c_bpe_label{}'.format(x-1)])
+        permuates = permuate_labels(labels, sc_token)
+        for idx, per in enumerate(permuates):
+            sample.update({"per{}".format(idx): per})
+        yield sample
+
+
+# process sot label, i.e. add sc token into label
+def process_sot_label(data, special_token=None):
+    #for i, sample in enumerate(data):
+    for sample in data:
+        new_label = copy.deepcopy(sample['bpe_label'])
+        if 'sc' not in special_token:
+            print('sc should be specify for sot methods')
+        crpt_bpe_label = sample['c_bpe_label']
+        new_label = new_label + [special_token['sc']] + crpt_bpe_label
+        sample.update({'bpe_label': new_label})
+        yield sample
+
+# process cohort label
+def process_cohort_label(data):
+    for sample in data:
+        bpe_label = copy.deepcopy(sample['bpe_label'])
+        phn_label = copy.deepcopy(sample['phn_label'])
+        if 'c_bpe_label' not in sample:
+            sample.update({"c_bpe_label": bpe_label})
+        if 'c_phn_label' not in sample:
+            sample.update({"c_phn_label": phn_label})
+        yield sample
+
+# process sequential rec
+def process_sequentail_label(data, special_token=None):
+    TEXT_SPEC_TOKEN.update(special_token)
+    for sample in data:
+        keywords = []
+        # first sample keywords from bpe_label
+        dice = random.uniform(0, 1)
+        label_mask = []
+        max_label_len = 0
+        if dice >= 0.5:
+            if len(sample['bpe_label']) > max_label_len:
+                max_label_len = len(sample['bpe_label'])
+            one_kw, _, kw_length, _, _ = make_keyword(sample, positive_prob=1.2, neg_len=None)
+            one_kw, _, _, _ = inject_special_token(one_kw, kw_length, special_token=special_token)
+            keywords.append(one_kw)
+            label_mask.append(1)
+        
+        for idx in range(sample['n_label']-1):
+            dice = random.uniform(0,1)
+            if dice < 0.5:
+                label_mask.append(0)
+                continue
+            s_crpt_idx = idx + 1
+            one_crpt = sample['corruption_material'][s_crpt_idx]
+            if len(one_crpt['bpe_label']) > max_label_len:
+                max_label_len = len(one_crpt['bpe_label'])
+            one_kw, _, kw_length, _, _ = make_keyword(one_crpt, positive_prob=1.2, neg_len=None)
+            one_kw, _, _, _ = inject_special_token(one_kw, kw_length, special_token=special_token)
+            keywords.append(one_kw)
+            label_mask.append(1)
+        if len(keywords) == 0:
+            keywords = [special_token['unk']]
+
+        if len(label_mask) < 3:
+            label_mask = label_mask + [1 for x in range(3-len(label_mask))]
+        
+        if sum(label_mask) == 3:
+            label_mask.append(0)
+        else:
+            label_mask.append(1)
+        one_neg_label = [special_token['unk'] for x in range(max_label_len)]
+        sample.update({'keyword': keywords, 'label_mask': label_mask, 'neg_label': one_neg_label}) 
         yield sample
 
 # sample keyword from asr label, actually sample positive and make a negative
 def make_keyword(sample, positive_prob, neg_len=None):
     dice = random.uniform(0, 1)
-    label = copy.deepcopy(sample['label'])
+    label = copy.deepcopy(sample['phn_label'])
     if dice > positive_prob: # negative sample
-        if 'crpt_label' in sample:
-            crpt_label = sample['crpt_label']
+        if 'c_phn_label' in sample:
+            crpt_label = sample['c_phn_label']
             mlabel = label + crpt_label
         kw = random_one_neg(sample['neg_candidate'], neg_len, mlabel, sample['key'].split('-')[0])
         kw_pos = -1
@@ -854,11 +985,14 @@ def make_keyword(sample, positive_prob, neg_len=None):
 
 # sample positive keyword from asr label
 def sample_kw_from_label(label, kw_candidate=None):
-    kw_len = random.randint(2, 5)
+    kw_len = random.randint(2, 6)
     if kw_candidate: #TODO: a little bit confuse ...  optim it latter
-        kw_pos = random.randint(0, len(kw_candidate)-kw_len) if len(kw_candidate) > kw_len else 0
-        kw_pos = kw_candidate[kw_pos]
-        kw_len = kw_candidate[kw_pos+kw_len] - kw_pos
+        kw_len = kw_len if kw_len < len(kw_candidate) else 1
+        kw_pos_idx = random.randint(0, len(kw_candidate)-kw_len-1) if len(kw_candidate) > kw_len+1 else 0
+        kw_pos = kw_candidate[kw_pos_idx]
+        if kw_pos_idx+kw_len >= len(kw_candidate):
+            kw_len -= 1 
+        kw_len = kw_candidate[kw_pos_idx+kw_len] - kw_pos
     else:
         kw_pos = random.randint(0, len(label)-kw_len) if len(label) > kw_len else 0
     kw = label[kw_pos: kw_pos + kw_len]
@@ -880,7 +1014,7 @@ def random_one_neg(neg_list, neg_len, pos_label, spk_id=None):
         one_neg_list = json.loads(one_neg_list)
         if spk_id != None:
             neg_spk = one_neg_list['key'].split('-')[0]
-        one_neg_label = one_neg_list['label']
+        one_neg_label = one_neg_list['phn_label']
         kw_candidate = one_neg_list.get('kw_candidate', None) 
         neg, _ = sample_kw_from_label(one_neg_label, kw_candidate)
         flatten_neg = unfold_list(neg)

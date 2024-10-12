@@ -6,14 +6,16 @@ self_corruption:
   prob: 0.65
   sampler: uniform
   sampler_config:
-    low: 0.2
+    low: 0.4
     high: 0.9
-none_target_corruption:
-  corrupt_list: noise.50.list 
-  prob: 0.5
-  num_corrupt: 1
-  sampler: uniform
-  sampler_config:
-    low: 0.2
-    high: 0.9
-rirs_list: rirs.scp
+#none_target_corruption: 
+#  corrupt_list: aishell_ke_data/noise.cutted.scp
+#  prob: 1
+#  num_corrupt: 1
+#  sampler: uniform
+#  sampler_config:
+#    low: 0.3
+#    high: 0.7
+rirs:
+  rirs_prob: 0.4
+rirs_list: aishell_ke_data/remove_bad.scp

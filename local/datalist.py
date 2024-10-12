@@ -194,7 +194,7 @@ class MakeDataList(ArgumentParser):
             word_align_info = one_align['tiers']['words']['entries']
             phone_align_info = one_align['tiers']['phones']['entries']
             self.utt2align.update({
-                utt:{ 'word_align_info': word_align_info, 'phone_align_info': phone_align_info}
+                utt:{'word_align_info': word_align_info, 'phone_align_info': phone_align_info}
             })
 
     def make_keyword_datalist(self, keyword2id=None):

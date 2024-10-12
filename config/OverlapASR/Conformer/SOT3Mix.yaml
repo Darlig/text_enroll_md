@@ -1,5 +1,5 @@
 # model archive
-model_arch: AEDKWSASRPhone
+model_arch: AEDASR
 
 # model config
 model_config:
@@ -30,8 +30,7 @@ model_config:
 
   kw_net_config:
     #num_token: 31 # letter 1-26 special token ' and tow keyword pos_token 28, 29, 30 for unknown
-    num_bpe_token: 5003 # 0;1: blank; phone: 1,69;71 special token [71,72];73, sos/eos 73,74;75
-    num_phn_token: 72
+    num_bpe_token: 5004 # 0;1: blank; phone: 1,69;71 special token [71,72];73, sos/eos 73,74;75
     input_trans: 
       dim: 256
       num_block: 1
@@ -43,6 +42,7 @@ model_config:
       self_att_config: *att_common
       feed_forward_config: *feed_forward_common
   decoder_net_config:
+    num_bpe_token: 5004
     input_trans: 
       dim: 256
       num_block: 1
@@ -62,15 +62,16 @@ model_config:
   num_kw_block: 4
   sos: 2
   eos: 5002
+  sc: 5003
   num_doecoder_block: 4
-  loss_weight: [0.3, 0.1, 0.3]
+  ctc_weight: 0
 
 # experimental config
 exp_config:
   trained_ckpt: ""
-  exp_dir: exp/conformer_phone_kws_bpe_aed_200k_data_macaron_no_cross
+  exp_dir: exp/sot_3mix
   warm_up_peak_epoch: 10
-  exp_name: kwatt_asr
+  exp_name: sot_aed_asr
   optim_config:
     lr: 0.001
   log_config:
@@ -86,23 +87,11 @@ data_config: &base_data_config
   start_epoch: 0
   shuffle: True
   num_worker: 18
-  sph_config: !include config/base_config/self_corrupt.yaml
-  keyword_config:
-    format: sample
-    config:
-      positive_prob: 0.5
-      special_token: 
-        #sok: 5002
-        #eok: 5003
-        unk: 1
-        #psok: 71
-        #peok: 72
-        punk: 71
-
-  length_key: mixspeech,speech,keyword
-  fetch_key: mixspeech,mixspeech_len,phn_label,phn_label_len,keyword,keyword_len,bpe_label,bpe_label_len,target
-  batch_size: 48
-  #data_list: resource/datalist.train.txt.new
-  data_list: resource/200k_data/datalist.train.txt
-  valid_list: resource/200k_data/datalist.valid.txt
+  sph_config: !include config/base_config/self_corrupt_3mix_delay.yaml
+  text_config:
+    sc_token: 5003
+  fetch_key: mixspeech,mixspeech_len,fifo_label,fifo_label_len
+  batch_size: 3
+  data_list: new.list
+  valid_list: new.list
 

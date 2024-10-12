@@ -1,0 +1,60 @@
+# model archive
+model_arch: ConformerCTC
+
+# model config
+model_config:
+  num_token: 5003
+  audio_net_config:
+    input_trans: &linear_common
+      dim: [256, 256]
+      num_block: 1
+      norm: LayerNorm
+      act: ReLU
+    transformer_config: 
+      size: 256
+      self_att: MultiHeadAtt
+      self_att_config: &att_common
+        n_head: 4
+        n_feats: 256
+      cross_att: MultiHeadCrossAtt
+      corss_att_config: 
+        n_head: 1
+        n_feats: 256
+        norm: LayerNorm
+      feed_forward_config: &feed_forward_common
+        dim: [256, 2048, 256]
+        num_block: 1
+        norm: LayerNorm
+        act: ReLU
+      conv_config:
+        channels: 256
+
+# experimental config
+exp_config:
+  trained_ckpt: ""
+  exp_dir: exp/conformer_ctc
+  warm_up_peak_epoch: 10
+  exp_name: conformer_ctc
+  optim_config:
+    lr: 0.001
+  log_config:
+    level: "INFO"
+    filemode: "a"
+    format:  "%(asctime)s: %(message)s"
+  log_interval: 5
+  valid_interval: 100
+
+# data config
+data_config: &base_data_config
+  epoch: 200
+  start_epoch: 0
+  shuffle: True
+  num_worker: 18
+  sph_config: !include config/base_config/clean.yaml
+  text_config:
+    sc_token: 5003
+  fetch_key: speech,speech_len,bpe_label,bpe_label_len
+  batch_size: 3
+  data_list: new.list
+  valid_list: new.list
+

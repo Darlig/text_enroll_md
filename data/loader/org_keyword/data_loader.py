@@ -3,13 +3,11 @@
 import torch
 import random
 import copy
-import data.loader.factory as factory
+import data.loader.factory as utils
 import torch.distributed as dist 
 
-from typing_extensions import Tuple, List, Dict, Optional, Any, Iterator
 from local.utils import read_list
 from torch.utils.data import IterableDataset
-
 
 class Processer(IterableDataset):
     def __init__(
@@ -38,9 +36,9 @@ class Processer(IterableDataset):
 class DistributedSampler:
     def __init__(
         self,
-        shuffle: bool=True,
-        partition: bool=True
-    )-> Dict:
+        shuffle=True,
+        partition=True
+    ):
         self.epoch=-1
         self.update()
         self.shuffle = shuffle
@@ -69,10 +67,10 @@ class DistributedSampler:
             num_workers=self.num_workers
         )
 
-    def set_epoch(self, epoch: int) -> None:
+    def set_epoch(self, epoch):
         self.epoch = epoch
     
-    def sample(self, indexes: List) -> List:
+    def sample(self, indexes):
         if self.partition:
             if self.shuffle:
                 random.Random(self.epoch).shuffle(indexes)
@@ -81,18 +79,14 @@ class DistributedSampler:
         return indexes
 
 class DataList(IterableDataset):
-    num_crpt = 200 # if do crption for each training sample assign <num_crpt> as candidate 
-                   # during training process each training sample will be corrupte by a component randomly 
-                   # sampled from the 200 candidate, this number is employed by all kind of corruption: 
-                   # self_corruption, negative sample, noise corruption and rirs and so on.
     def __init__(
         self,
         lists,
-        self_corruption: bool=False,
-        none_target_corruption_list: Optional[List]=None,
-        rirs_list: Optional[List]=None,
-        shuffle: bool=True,
-        partition: bool=True,
+        self_corruption=False,
+        none_target_corruption_list=None,
+        rirs_list=None,
+        shuffle=True,
+        partition=True,
     ):
         self.lists = lists
         self.sampler = DistributedSampler(shuffle, partition)
@@ -109,10 +103,10 @@ class DataList(IterableDataset):
         else:
             self.reverb = False
     
-    def set_epoch(self, epoch: int) -> None:
+    def set_epoch(self, epoch):
         self.sampler.set_epoch(epoch)
     
-    def padding(self, org_list: List, target_len: int) -> List:
+    def padding(self, org_list, target_len):
         org_len = len(org_list)
         assert org_len < target_len
         num_repeat = target_len // org_len
@@ -121,80 +115,71 @@ class DataList(IterableDataset):
             new_list += org_list
         return new_list
 
-    def make_corrupt_candidate(self, lists: List, indexes: List, num_candidate: int=5) -> List[Dict]:
+    def make_corrupt_candidate(self, lists, indexes, num_candidate=5):
         idx = random.choices(indexes, k=num_candidate)
         candidate = []
         for i in idx:
             candidate.append(lists[i])
+        if num_candidate == 1:
+            candidate = candidate[0]
         return candidate
 
-    def __iter__(self) -> Iterator[Dict]:
+    def __iter__(self):
         sampler_info = self.sampler.update()
         indexes = list(range(len(self.lists)))
         indexes = self.sampler.sample(indexes)
-
-        # make mixture between the training set: -> make overlap speech
         if self.self_corruption:
             self_corrupt_lists = copy.deepcopy(self.lists)
             self_corrupt_indexes = list(range(len(self_corrupt_lists)))
             self_corrupt_indexes = self.sampler.sample(self_corrupt_indexes)
-
-        # make mixture between training target and noise speech: -> noise data augmentation
         if self.none_target_corruption:
             none_target_corrupt_lists = self.none_target_corruption_list
             none_target_corrupt_indexes = list(range(len(none_target_corrupt_lists)))
             none_target_corrupt_indexes = self.sampler.sample(none_target_corrupt_indexes)
-
-        # make reverbaration speech: -> reverb augmentation
         if self.reverb:
             rirs_lists = self.rirs_list
             rirs_indexes = list(range(len(rirs_lists)))
             rirs_indexes = self.sampler.sample(rirs_indexes)
 
-        # prepare mate data: pack self-crroupt data, noise data, and augmentation data into "data"
         for i, index in enumerate(indexes):
             data = dict(src=self.lists[index], epoch=self.sampler.epoch)
             data.update(sampler_info)
             if self.self_corruption:
                 self_corrupt_candidate = self.make_corrupt_candidate(
-                    self_corrupt_lists, self_corrupt_indexes, num_candidate=self.num_crpt
+                    self_corrupt_lists, self_corrupt_indexes
                 )
                 data.update(self_corruption=copy.deepcopy(self_corrupt_candidate))
-                #NOTE: self corruption and negative samples
+
                 one_neg_candidate = self.make_corrupt_candidate(
-                    self_corrupt_lists, self_corrupt_indexes, num_candidate=self.num_crpt
+                    self_corrupt_lists, self_corrupt_indexes, num_candidate=70
                 )
                 data.update(neg_candidate=one_neg_candidate)
-            
             if self.none_target_corruption:
                 none_target_corrupt_candidate = self.make_corrupt_candidate(
-                    none_target_corrupt_lists, none_target_corrupt_indexes, num_candidate=self.num_crpt
+                    none_target_corrupt_lists, none_target_corrupt_indexes
                 )
                 data.update(none_target_corruption=none_target_corrupt_candidate)
-
             if self.reverb:
-                rirs_src = self.make_corrupt_candidate(rirs_lists, rirs_indexes, num_candidate=self.num_crpt)
+                rirs_src = self.make_corrupt_candidate(rirs_lists, rirs_indexes, num_candidate=1)
                 data.update(rirs=rirs_src)
             yield data
 
 
-def Dataset(conf: Dict,  d_list: List) -> Tuple[Any, ...]:
+def Dataset(
+    conf, 
+    d_list,
+):
     # check speech config
     sph_config = conf.get('sph_config', None)
     if not sph_config:
         raise NotImplementedError(
-            """sph_config should be specificed, there are no any default config for """\
-            """speech feats"""
+            "sph_config should be specific, there are no any default config for " + 
+            "speech feats"
         )
-
-    # init data list config & corruption config (self corruption and data augmentation)
-    data_list_config = dict()
-    corruption_config = dict()
-    data_list_config.update({
-        "lists": d_list,
-        'shuffle': conf.get('shuffle', True)
-    })
-
+    data_list_config = {'lists': d_list}
+    shuffle = conf.get('shuffle', True)
+    data_list_config.update({'shuffle': shuffle})
+    corruption_config = {}
     if sph_config.get('self_corruption', False):
         corruption_config.update({'self_corruption': sph_config.get('self_corruption')})
         self_corruption = True 
@@ -205,9 +190,8 @@ def Dataset(conf: Dict,  d_list: List) -> Tuple[Any, ...]:
         none_target_corruption_list = corruption_config['none_target_corruption']['corrupt_list']
         none_target_corruption_list = read_list(none_target_corruption_list)
         data_list_config.update({'none_target_corruption_list': none_target_corruption_list})
-
-    if sph_config.get('rirs_list', False):
-        rirs_list = sph_config['rirs_list']
+    if sph_config.get('rirs', False):
+        rirs_list = sph_config['rirs']['rirs_list']
         rirs_list = read_list(rirs_list)
         data_list_config.update({'rirs_list': rirs_list})
         
@@ -216,17 +200,17 @@ def Dataset(conf: Dict,  d_list: List) -> Tuple[Any, ...]:
     dataset = DataList(**data_list_config)
 
     # START DATA PROCESS!!!
-    dataset = Processer(dataset, factory.process_raw)
+    dataset = Processer(dataset, utils.process_raw)
 
     if len(corruption_config) > 0:
-        dataset = Processer(dataset, factory.process_corruption, corruption_config)
+        dataset = Processer(dataset, utils.process_corruption, corruption_config)
 
     # prepare speech feats
-    dataset = Processer(dataset, factory.process_speech_feats, sph_config)
+    dataset = Processer(dataset, utils.process_speech_feats, sph_config)
 
     # prepare text feats, such as label, keyword etc.
     text_config = conf.get('text_config', {})
-    dataset = Processer(dataset, factory.process_text_feats, **text_config)
+    dataset = Processer(dataset, utils.process_text_feats, **text_config)
 
     # process keyword setting
     keyword_setting = conf.get('keyword_config', None) 
@@ -238,9 +222,9 @@ def Dataset(conf: Dict,  d_list: List) -> Tuple[Any, ...]:
             crpt_list = copy.deepcopy(d_list)
             random.shuffle(crpt_list)
             keyword_config.update({'neg_len': 70})
-            dataset = Processer(dataset, factory.process_sampled_keyword_from_label,  **keyword_config)
+            dataset = Processer(dataset, utils.process_sampled_keyword_from_label,  **keyword_config)
         elif keyword_format == 'fix':
-            dataset = Processer(dataset, factory.process_fix_keyword, **keyword_config)
+            dataset = Processer(dataset, utils.process_fix_keyword, **keyword_config)
         elif keyword_format == 'test':
             pass
         else:
@@ -252,29 +236,27 @@ def Dataset(conf: Dict,  d_list: List) -> Tuple[Any, ...]:
     
     sot_label_config = conf.get('sot_config', None)
     if sot_label_config:
-        dataset = Processer(dataset, factory.process_sot_label, **sot_label_config)
+        dataset = Processer(dataset, utils.process_sot_label, **sot_label_config)
 
     permuate_label_config = conf.get('permuate_label_config', None)
     if permuate_label_config:
-        dataset = Processer(dataset, factory.process_permuate_label, **permuate_label_config)
-
+        dataset = Processer(dataset, utils.process_permuate_label, **permuate_label_config)
+    
     conditional_chain_config = conf.get('conditional_chain', None)
+    print (conditional_chain_config)
     if conditional_chain_config:
-        dataset = Processer(dataset, factory.process_conditional_chain_label, **conditional_chain_config)
-
-    permuate_with_keyword_config = conf.get('permuate_with_keyword', None)
-    if permuate_with_keyword_config:
-        permuate_with_keyword_config.update({'neg_len': 20})
-        dataset = Processer(dataset, factory.process_permuate_label_with_keyword, **permuate_with_keyword_config)
-
+        dataset = Processer(dataset, utils.process_conditional_chain_label, **conditional_chain_config)
+    #sequentail_label_config = conf.get('sequentail_label_config', None)
+    #if sequentail_label_config:
+    #    dataset = Processer(dataset, utils.process_sequentail_label, **sequentail_label_config) 
     # process list data 
-    dataset = Processer(dataset, factory.process_list_data)
+    dataset = Processer(dataset, utils.process_list_data)
 
     # process length information
-    dataset = Processer(dataset, factory.make_length)
+    dataset = Processer(dataset, utils.make_length)
 
     # make batch
-    dataset = Processer(dataset, factory.make_batch, conf.get('batch_size', 256))
+    dataset = Processer(dataset, utils.make_batch, conf.get('batch_size', 256))
 
     # if fetch_key from config is not None, use that fetch_key
     if conf.get('fetch_key', None):
@@ -283,6 +265,6 @@ def Dataset(conf: Dict,  d_list: List) -> Tuple[Any, ...]:
         fetch_key = ['speech', 'label', 'keyword']
 
     # fetch tensor
-    dataset = Processer(dataset, factory.fetch_tensor, fetch_key)
+    dataset = Processer(dataset, utils.fetch_tensor, fetch_key)
     return dataset
 

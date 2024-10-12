@@ -1,0 +1,87 @@
+# model archive
+model_arch: EncoderDecoder
+
+# model config
+model_config:
+  encoder_net_config:
+    num_token: 5003
+    audio_net_config:
+      input_trans: &linear_common
+        dim: [256, 256]
+        num_block: 1
+        norm: LayerNorm
+        act: ReLU
+      transformer_config: 
+        size: 256
+        self_att: MultiHeadAtt
+        self_att_config: &att_common
+          n_head: 4
+          n_feats: 256
+        cross_att: MultiHeadCrossAtt
+        corss_att_config: 
+          n_head: 1
+          n_feats: 256
+          norm: LayerNorm
+        feed_forward_config: &feed_forward_common
+          dim: [256, 2048, 256]
+          num_block: 1
+          norm: LayerNorm
+          act: ReLU
+        conv_config:
+          channels: 256
+  decoder_net_config:
+    num_bpe_token: 5004
+    input_trans: 
+      dim: 256
+      num_block: 1
+      norm: LayerNorm
+      act: ReLU
+    transformer_config:
+      size: 256
+      self_att: MultiHeadAtt
+      self_att_config: *att_common
+      cross_att: MultiHeadCrossAtt
+      corss_att_config: 
+        n_head: 1
+        n_feats: 256
+        norm: LayerNorm
+      feed_forward_config: *feed_forward_common
+  num_audio_block: 9
+  num_kw_block: 4
+  sos: 2
+  eos: 5002
+  sc: 5003
+  num_doecoder_block: 4
+  ctc_weight: 0
+  fix_encoder: True
+  trained_encoder_ckpt: conformer_ctc_avg.pt
+
+# experimental config
+exp_config:
+  trained_ckpt: ""
+  exp_dir: exp/ctc_rank_from_trained_model_no_fix
+  warm_up_peak_epoch: 10
+  exp_name: ctc_rank_from_trianed_model
+  optim_config:
+    lr: 0.001
+  log_config:
+    level: "INFO"
+    filemode: "a"
+    format:  "%(asctime)s: %(message)s"
+  log_interval: 5
+  valid_interval: 100
+
+# data config
+data_config: &base_data_config
+  epoch: 200
+  start_epoch: 0
+  shuffle: True
+  num_worker: 18
+  sph_config: !include config/base_config/self_corrupt_3mix_prob.yaml
+
+  length_key: mixspeech,speech,keyword
+  fetch_key: mixspeech,mixspeech_len,bpe_label,c_bpe_label0,c_bpe_label1,bpe_label_len,c_bpe_label0_len,c_bpe_label1_len,label_mask
+  batch_size: 3
+  data_list: new.list
+  valid_list: new.list
+

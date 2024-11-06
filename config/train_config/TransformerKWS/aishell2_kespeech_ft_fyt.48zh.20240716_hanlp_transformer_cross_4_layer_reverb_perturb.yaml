@@ -1,0 +1,102 @@
+# model archive
+model_arch: TransformerKWSPhone
+
+# model config
+model_config:
+  audio_net_config:
+    input_trans: &linear_common
+      dim: [256, 256]
+      num_block: 1
+      norm: LayerNorm
+      act: ReLU
+    transformer_config: 
+      size: 256
+      self_att: MultiHeadAtt
+      self_att_config: &att_common
+        n_head: 4
+        n_feats: 256
+      cross_att: MultiHeadCrossAtt
+      corss_att_config: 
+        n_head: 1
+        n_feats: 256
+        norm: LayerNorm
+      feed_forward_config: &feed_forward_common
+        dim: [256, 512, 256]
+        num_block: 1
+        norm: LayerNorm
+        act: ReLU
+      conv_config:
+        channels: 256
+
+  kw_net_config:
+    #num_token: 31 # letter 1-26 special token ' and tow keyword pos_token 28, 29, 30 for unknown
+    num_phn_token: 176
+    input_trans: 
+      dim: 256
+      num_block: 1
+      norm: LayerNorm
+      act: ReLU
+    transformer_config:
+      size: 256
+      self_att: MultiHeadAtt
+      self_att_config: *att_common
+      feed_forward_config: *feed_forward_common
+  num_audio_block: 8
+  num_kw_block: 4
+  sok: 1
+  eok: 2
+  loss_weight: [0.3, 0.1, 0.3]
+
+# experimental config
+exp_config:
+  trained_ckpt: ""
+  exp_dir: exp/aishell2_kespeech_mandarin_ft_fyt.48zh.20240716_hanlp_transformer_cross_4_layer_reverb_perturb
+  warm_up_peak_epoch: 5
+  exp_name: kwatt_asr
+  optim_config:
+    lr: 0.001
+  log_config:
+    level: "INFO"
+    filemode: "a"
+    format:  "%(asctime)s: %(message)s"
+  log_interval: 5
+  valid_interval: 100
+
+# data config
+data_config: &base_data_config
+  epoch: 150
+  #epoch: 50
+  start_epoch: 50
+  #start_epoch: 26
+  #start_epoch: 0
+  shuffle: True
+  num_worker: 18
+  sph_config: !include config/base_config/self_corrupt_musan_nonspeech_reverb_perturb_ft.yaml
+  keyword_config:
+    format: sample
+    config:
+      positive_prob: 0.5
+      special_token:
+        sok: 1
+        eok: 2
+        unk: 5766
+        psok: 1
+        peok: 2
+        punk: 175
+        with_trans: True
+  length_key: mixspeech,speech,keyword
+  #fetch_key: speech,speech_len,phn_label,phn_label_len,keyword,keyword_len,target
+  fetch_key: mixspeech,mixspeech_len,phn_label,phn_label_len,keyword,keyword_len,target
+  #batch_size: 80
+  #batch_size: 10
+  batch_size: 100
+  #data_list: resource/aishell2_kespeech_mandarin/cut_head_100_1channel/datalist.train.txt
+  #data_list: resource/aishell2_kespeech_mandarin_fyt.48zh.20240716/datalist.valid_t100.txt
+  #data_list: resource/aishell2_kespeech_mandarin_ft_fyt.48zh.20240716/data_process/datalist_fyt_samp_train2.txt
+  data_list: resource/aishell2_kespeech_mandarin_ft_fyt.48zh.20240716/data_process/datalist_fyt_samp_train_gt16k_rand.txt
+  #data_list: resource/aishell2_kespeech_mandarin_ft_fyt.48zh.20240716/data_process/datalist_fyt_samp_train.txt
+  #valid_list: resource/aishell2_kespeech_mandarin/cut_head_100_1channel/datalist.valid.txt
+  #valid_list: resource/aishell2_kespeech_mandarin_fyt.48zh.20240716/datalist.valid_t100.txt
+  valid_list: resource/aishell2_kespeech_mandarin_ft_fyt.48zh.20240716/data_process/datalist_fyt_samp_valid_gt16k_rand.txt
+  #valid_list: resource/aishell2_kespeech_mandarin_ft_fyt.48zh.20240716/data_process/datalist_fyt_samp_valid.txt
+

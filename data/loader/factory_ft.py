@@ -98,8 +98,6 @@ def process_raw(data: Iterator) -> Iterator[Dict[Any, Any]]:
             one_sample.update({'kw_lexicon': kw_lexicon})
         if 'finetune_data' in one_sample:
             finetune_data = one_sample['finetune_data']
-            #print(finetune_data)
-            #print(finetune_data_map[finetune_data])
             one_sample.update({'finetune_data': finetune_data_map[finetune_data]})
 
         epoch = sample['epoch']
@@ -140,15 +138,10 @@ def process_corruption(data: Iterator, config: Dict[Any, Any]) -> Iterator[Dict[
 
         # save the metarial into sample dict
         sample.update({
-            #'self_crpt_ratios': s_ratios,
             'noise_crpt_ratios': n_ratios,
-            #'self_crpt_material': s_corruption_material,
             'noise_crpt_material': n_corruption_material,
-            #'n_scorrupt': n_scorrupt, # number of utterences in overlap speech; 
-                                      # mixture = speech_1 + speech_2 ... speech_n_scorrupt
             'n_ncorrupt': n_ncorrupt, # number of noise data to performe noise 
                                       # augmentation noisy = mixture/speech + noise_1 + noise_2 .. noise_n
-            #'n_max_scorrupt': max_scorrupt,
             'num_corrupt': num_corrupt,
         })
         yield sample
@@ -229,13 +222,7 @@ def process_speech_feats(data: Iterator[Dict], config: Dict[Any, Any]) -> Iterat
         if config.get('subsample_rate'):
             feats = [f[::config.get('subsample_rate')] for f in feats]
 
-        ## Load feats into torch Tensor
-        #start_idx = 0
-        #if 'self_crpt_ratios' in sample:
-        #    mix_feats = feats[0]
-        #    sample.update({"mixspeech": mix_feats})
-        #else: # if no corruption meterail the 1th feats is clean feats
-        #    sample.update({"speech": feats[0]})
+        # Load feats into torch Tensor
         mix_feats = feats[0]
         sample.update({"mixspeech": mix_feats})
        
@@ -414,42 +401,8 @@ def process_sampled_keyword_from_label(
         new_phn_label = copy.deepcopy(sample['phn_label'])
         new_bpe_label = copy.deepcopy(sample['bpe_label'])
         bpe_candidate = copy.deepcopy(sample['b_kw_candidate'])
-        corrupt_label = None if 'mix_phn_label' not in sample else sample['mix_phn_label']
-        kw, kw_pos, kw_length, pos, target = utils.make_keyword(
-            candidate_seq=new_phn_label, negative_seq=sample['neg_candidate'], 
-            positive_prob=positive_prob, neg_len=neg_len, kw_position_candidate=sample['kw_candidate'],
-            corrupt_label=corrupt_label, max_keyword_len=max_keyword_len
-        )
-        kw, new_phn_label, new_bpe_label, kw_pos = utils.inject_special_token(
-            keyword=kw, keyword_length=kw_length, positive=pos, label=new_phn_label, 
-            keyword_pos=kw_pos, special_token=special_token,  bpe_label=new_bpe_label, bpe_candidate=bpe_candidate
-        )
-
-        sample.update({'keyword': kw, 'phn_label': new_phn_label, 'bpe_label': new_bpe_label, 'target': target}) 
-        yield sample
-
-#finetune_data_map = {'target_pos': 0, 'target_neg': 1, 'base_neg': 2}
-# Process: sample keyword from continues label
-def process_sampled_keyword_from_label_ft(
-        data: Iterator[Dict], positive_prob: float=0.5, neg_len: int = None, special_token: Dict = {}, max_keyword_len: int=6
-):
-    # TEXT_SPEC_TOKEN = {'sos','eos','sok', 'eok', 'unk'}
-    # sos: start of setence, eos: end of setence, sok: start of keyword, eok, end of keyword, unk: unknow token
-    TEXT_SPEC_TOKEN.update(special_token)
-    for sample in data:
-        new_phn_label = copy.deepcopy(sample['phn_label'])
-        new_bpe_label = copy.deepcopy(sample['bpe_label'])
-        bpe_candidate = copy.deepcopy(sample['b_kw_candidate'])
         finetune_data = copy.deepcopy(sample['finetune_data'])
-        #finetune_data = finetune_data_map[finetune_data]
-        #print(sample)
-        #print(sample['kw_lexicon']['phn_label'])
         kw_lexicon = copy.deepcopy(sample['kw_lexicon'])
-        #kw_lexicon = [ json.loads(keyword)['phn_label'] for keyword in kw_lexicon ]
-        #kw_lexicon = random.choice(kw_lexicon)
-        #print(kw_lexicon)
-        #kw_lexicon = json.loads(kw_lexicon)['phn_label']
-        #kw_lexicon = copy.deepcopy(sample['kw_lexicon']['phn_label'])
         corrupt_label = None if 'mix_phn_label' not in sample else sample['mix_phn_label']
         kw, kw_pos, kw_length, pos, target = utils.make_keyword(
             candidate_seq=new_phn_label, kw_lexicon=kw_lexicon,
@@ -631,8 +584,6 @@ def process_list_data(dataset):
             if isinstance(value, list):
                 value = utils.unfold_list(value)
             if not isinstance(value, torch.Tensor):
-                #print(key)
-                #print(value)
                 sample.update({key: torch.tensor(value)})
         yield sample
 

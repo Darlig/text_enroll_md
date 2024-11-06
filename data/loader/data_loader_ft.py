@@ -109,7 +109,6 @@ class DataList(IterableDataset):
             self.reverb = True
         else:
             self.reverb = False
-        #self.kw_lexicon = kw_lexicon
         self.kw_lexicon = [ json.loads(keyword)['phn_label'] for keyword in kw_lexicon ]
     
     def set_epoch(self, epoch: int) -> None:
@@ -182,7 +181,6 @@ class DataList(IterableDataset):
                 rirs_src = self.make_corrupt_candidate(rirs_lists, rirs_indexes, num_candidate=self.num_crpt)
                 data.update(rirs=rirs_src)
             data.update(kw_lexicon=kw_lexicon)
-            #data.update(finetune_data=finetune_data_map[self.finetune_data])
             yield data
 
 
@@ -250,7 +248,7 @@ def Dataset(conf: Dict,  d_list: List) -> Tuple[Any, ...]:
             crpt_list = copy.deepcopy(d_list)
             random.shuffle(crpt_list)
             keyword_config.update({'neg_len': 70})
-            dataset = Processer(dataset, factory.process_sampled_keyword_from_label_ft,  **keyword_config)
+            dataset = Processer(dataset, factory.process_sampled_keyword_from_label,  **keyword_config)
         elif keyword_format == 'fix':
             dataset = Processer(dataset, factory.process_fix_keyword, **keyword_config)
         elif keyword_format == 'test':

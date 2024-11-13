@@ -14,6 +14,7 @@ from yamlinclude import YamlIncludeConstructor
 from data.loader.data_loader import Dataset
 from local.utils import WarmUpLR, read_list, Recorder
 from torch.utils.tensorboard import SummaryWriter
+import shutil
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -122,6 +123,16 @@ class Trainer():
             # exp config backup in expdir
             ef = open("{}/exp.yaml".format(self.exp_config['exp_dir']), 'w')
             yaml.dump(self.exp_config, ef)
+            # data process code backup in expdir
+            data = "{}/data/".format(self.exp_config['exp_dir'])
+            if os.path.exists(data):
+                shutil.rmtree(data)
+            shutil.copytree("data", data, symlinks=True)
+            # model structure code backup in expdir
+            model = "{}/model/".format(self.exp_config['exp_dir'])
+            if os.path.exists(model):
+                shutil.rmtree(model)
+            shutil.copytree("model", model, symlinks=True)
 
     def compute_redundancy(self, n):
         r1 = n % self.world_size

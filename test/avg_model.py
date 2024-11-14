@@ -23,17 +23,17 @@ def get_args():
         help="config file in yaml format e.g. config/ref.yaml"
     )
     parser.add_argument(
+        '--min_epoch',
+        required=True,
+	type=int,
+        help = "min epoch for avgerage"
+    )
+    parser.add_argument(
         '--max_epoch',
         required=True,
 	type=int,
         help = "max epoch for avgerage"
     )
-    #parser.add_argument(
-    #    '--avg_epoch',
-    #    required=True,
-    #    type=int,
-    #    help = "number of epochs for avgerage"
-    #)
 
     args = parser.parse_args()
     return args
@@ -51,11 +51,9 @@ class Trainer():
         self.recorder = Recorder(self.exp_config)
 
     def avg_model_custom(self):
-        # average the last 10 model
+        min_epoch = args.min_epoch
         max_epoch = args.max_epoch
-        avg_epoch = self.exp_config.get('avg_epoch', 10)
-        #max_epoch = 50
-        min_epoch = max_epoch - avg_epoch
+        avg_epoch = max_epoch - min_epoch
         valid_ckpt = {k:0 for k in range(min_epoch, max_epoch)}
         valid_loss = []
         for e in range(min_epoch, max_epoch):
@@ -65,7 +63,7 @@ class Trainer():
             valid_ckpt[e] = ckpt['model']
             valid_loss.append(one_valid_loss)
         sort_idx = sorted(range(len(valid_loss)), key=lambda k: valid_loss[k])
-        min_idx = sort_idx[:10]
+        min_idx = sort_idx[:avg_epoch]
         state = None
         avg_model = None
         for k in min_idx:
@@ -78,7 +76,7 @@ class Trainer():
                     avg_model[k] += state[k]
         for k in avg_model.keys():
             if avg_model[k] is not None:
-                avg_model[k] = torch.true_divide(avg_model[k], 10)
+                avg_model[k] = torch.true_divide(avg_model[k], avg_epoch)
         self.recorder.save_state(avg_model, epoch='avg_{}-{}'.format(min_epoch, max_epoch))
         
     def run(self):

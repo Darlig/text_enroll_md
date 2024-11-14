@@ -319,45 +319,7 @@ def compute_dcf(y_true, y_scores, cost_miss, cost_fa, prior_target, test_result_
     print("DCF p_miss: {0}".format(1 - tpr[dcf_index]))
     print("DCF p_fa: {0}".format(fpr[dcf_index]))
     print("DCF fa_per_hour: {0}".format(fpr[dcf_index]*shift_per_hour))
-    # out_csv = os.path.join(test_result_dir, "dcf_{}_{}_{}_{}.csv".format(cost_miss, cost_fa, prior_target, analysis_id))
-    # with open(out_csv, 'w') as f_out_csv:
-        #f_out_csv.write("{}".format(dcf_threshold))
     f_out_csv.write("{}\n".format(", ".join([str(word_id), str(cost_miss), str(cost_fa), str(prior_target), str(dcf), str(dcf_threshold), str(1-tpr[dcf_index]), str(fpr[dcf_index]), str(fpr[dcf_index]*shift_per_hour)])))
-    #f_out_csv.write("\n{}".format(", ".join([in_pos_id, in_neg_keyword, str(cost_miss), str(cost_fa), str(prior_target), str(dcf), str(dcf_threshold), str(1-tpr[dcf_index]), str(fpr[dcf_index])])))
-
-
-def plot_roc(positive_result, utt2keyword_idx, negative_result):
-    pos_hyp = []
-    pos_ref = []
-    for utt, result in positive_result.items():
-        pos_hyp.extend(result)
-        target_keyword_idx = utt2keyword_idx[utt]
-        one_hot = [0 for x in range(len(result))]
-        one_hot[target_keyword_idx] = 1
-        pos_ref.extend(one_hot)
-    
-    neg_hyp = []    
-    neg_ref = []
-    for utt, result in negative_result.items():
-        neg_hyp.extend(result)
-        one_hot = [0 for x in range(len(result))]
-        neg_ref.extend(one_hot)
-
-
-    fpr, tpr, thresholds = roc_curve(pos_ref+neg_ref, pos_hyp+neg_hyp)
-
-    roc_auc = auc(fpr, tpr)
-
-    plt.figure()
-    plt.plot(fpr, tpr, color='darkorange', lw=2, label='ROC curve (area = %0.2f)' % roc_auc)
-    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.05])
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title('ROC')
-    plt.legend(loc="lower right")
-    plt.savefig('unet.transformer.png', dpi=400)
 
 
 def result_analysis_shift(positive_result, utt2keyword_idx, negative_result, test_result_dir, analysis_id, f_out_csv):
@@ -405,13 +367,12 @@ def result_analysis_shift(positive_result, utt2keyword_idx, negative_result, tes
                 one_hot = [0 for x in range(len(chunk))]
                 neg_ref.extend(one_hot)
     
-    plot_roc_curve(pos_ref+neg_ref, pos_hyp+neg_hyp, test_result_dir, analysis_id)
+    plot_roc_curve(pos_ref+neg_ref, pos_hyp+neg_hyp, test_result_dir, analysis_id, 'all')
     if dcf_config is not None:
         compute_dcf(pos_ref+neg_ref, pos_hyp+neg_hyp, cost_miss, cost_fa, prior_target, test_result_dir, analysis_id, 'all', f_out_csv)
 
-def plot_roc_curve(ref_score, hyp_score, test_result_dir, analysis_id):
+def plot_roc_curve(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
     fpr, tpr, thresholds = roc_curve(ref_score, hyp_score)
-    #fpr, tpr, thresholds = roc_curve(pos_ref+neg_ref, pos_hyp+neg_hyp)
 
     roc_auc = auc(fpr, tpr)
 
@@ -422,9 +383,9 @@ def plot_roc_curve(ref_score, hyp_score, test_result_dir, analysis_id):
     plt.ylim([0.0, 1.05])
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
-    plt.title('ROC')
+    plt.title('ROC for {}'.format(word_py))
     plt.legend(loc="lower right")
-    plt_path = os.path.join(test_result_dir, 'unet.transformer_{}.png'.format(analysis_id))
+    plt_path = os.path.join(test_result_dir, 'unet.transformer_{}.png'.format("{}-{}".format(analysis_id, word_py)))
     plt.savefig(plt_path, dpi=400)
 
 
@@ -463,11 +424,9 @@ def result_analysis_shift_one_word(positive_result, utt2keyword_idx, negative_re
             neg_hyp.append(chunk_target_score)
             neg_ref.append(0)
     
-    plot_roc_curve(pos_ref+neg_ref, pos_hyp+neg_hyp, test_result_dir, "{}-{}".format(analysis_id, one_word_idx))
-    #out_csv = os.path.join(test_result_dir, "dcf_{}_{}_{}_{}.csv".format(cost_miss, cost_fa, prior_target, analysis_id))
-    #f_out_csv = open(out_csv, 'w')
+    plot_roc_curve(pos_ref+neg_ref, pos_hyp+neg_hyp, test_result_dir, analysis_id, one_word_py)
     if dcf_config is not None:
-        compute_dcf(pos_ref+neg_ref, pos_hyp+neg_hyp, cost_miss, cost_fa, prior_target, test_result_dir, analysis_id, one_word_idx, f_out_csv)
+        compute_dcf(pos_ref+neg_ref, pos_hyp+neg_hyp, cost_miss, cost_fa, prior_target, test_result_dir, analysis_id, one_word_py, f_out_csv)
 
 
 if __name__ == '__main__':
@@ -522,10 +481,8 @@ if __name__ == '__main__':
     out_csv = os.path.join(test_result_dir, "dcf_{}_{}_{}_{}.csv".format(cost_miss, cost_fa, prior_target, analysis_id))
     f_out_csv = open(out_csv, 'w')
     result_analysis_shift(positive_result, utt2keyword_idx, negative_result, test_result_dir, analysis_id, f_out_csv)
-    #plot_roc_shift(positive_result, utt2keyword_idx, negative_result, test_result_dir, analysis_id)
     if plot_each_word:
         for keyword, keywordidx in keyword2idx.items():
             print(keyword, keywordidx)
             result_analysis_shift_one_word(positive_result, utt2keyword_idx, negative_result, test_result_dir, analysis_id, keyword, keywordidx, f_out_csv)
-            #plot_roc_shift_one_word(positive_result, utt2keyword_idx, negative_result, test_result_dir, analysis_id, keyword, keywordidx)
     f_out_csv.close()

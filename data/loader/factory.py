@@ -211,7 +211,8 @@ def process_speech_feats(data: Iterator[Dict], config: Dict[Any, Any]) -> Iterat
 
         # Spec Augment: time & freq mask
         if config.get('spec_augment', False):
-            feats = [utils.spec_augment(f) for f in feats]
+            spec_augment_config = config.get('spec_augment')
+            feats = [utils.spec_augment(f, spec_augment_config) for f in feats]
 
         # Splice Feature: add context
         if config.get('splice_config'):

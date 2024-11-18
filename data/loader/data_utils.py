@@ -238,25 +238,36 @@ def random_one(pools: List[int], pool_len: int) -> Tuple[List]:
 
 # spec augmentation
 def spec_augment(
-        spec: torch.Tensor, num_t_mask: int=2, num_f_mask: int=2, max_t: int=20, max_f: int=10
+        spec: torch.Tensor, config: Dict
     ) -> torch.Tensor:
     assert isinstance(spec, torch.Tensor)
+    config = config.get('spec_augment', {})
+    num_t_mask = config.get('num_t_mask', 2)
+    num_f_mask = config.get('num_f_mask', 2)
+    max_t = config.get('max_t', 20)
+    max_f = config.get('max_f', 10)
+    spec_prob = config.get('spec_prob', 0.5)
     aug_spec = spec.clone().detach()
-    max_frames = aug_spec.size(0)
-    max_freq = aug_spec.size(1)
-    # time mask
-    for i in range(num_t_mask):
-        start = np.random.randint(0, max_frames - 1)
-        length = np.random.randint(1, max_t)
-        end = min(max_frames, start + length)
-        aug_spec[start:end, :] = 0
-    # freq mask
-    for i in range(num_f_mask):
-        start = np.random.randint(0, max_freq - 1)
-        length = np.random.randint(1, max_f)
-        end = min(max_freq, start + length)
-        aug_spec[:, start:end] = 0
-    return aug_spec
+    if random.uniform(0, 1) > spec_prob:
+        return aug_spec
+    else:
+        max_frames = aug_spec.size(0)
+        max_freq = aug_spec.size(1)
+        # print("max_frames: {}, max_freq: {}".format(max_frames, max_freq))
+        # time mask
+        for i in range(num_t_mask):
+            start = np.random.randint(0, max_frames - 1)
+            length = np.random.randint(1, max_t)
+            end = min(max_frames, start + length)
+            aug_spec[start:end, :] = 0
+        # freq mask
+        for i in range(num_f_mask):
+            start = np.random.randint(0, max_freq - 1)
+            length = np.random.randint(1, max_f)
+            end = min(max_freq, start + length)
+            aug_spec[:, start:end] = 0
+            # print("start: {}, end: {}".format(start, end))
+        return aug_spec
 
 # Speech augmentation: reverb, change speed
 def wav_augment(

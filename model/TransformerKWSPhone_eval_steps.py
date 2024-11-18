@@ -61,7 +61,7 @@ att_dict = {
     'MultiHeadAtt': NM.MultiHeadAtt
 }
 
-class TransformerKWSPhone(nn.Module):
+class TransformerKWSPhone_eval_steps(nn.Module):
     def __init__(
         self,
         audio_net_config,
@@ -75,7 +75,7 @@ class TransformerKWSPhone(nn.Module):
         loss_weight=[0.3,0.6,0.1],
         **kwargs,
     ):
-        super(TransformerKWSPhone, self).__init__()
+        super(TransformerKWSPhone_eval_steps, self).__init__()
         self.sok = sok
         self.eok = eok
         self.batch_padding_idx = batch_padding_idx

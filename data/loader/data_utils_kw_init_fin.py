@@ -264,7 +264,6 @@ def spec_augment(
         spec: torch.Tensor, config: Dict
     ) -> torch.Tensor:
     assert isinstance(spec, torch.Tensor)
-    config = config.get('spec_augment', {})
     num_t_mask = config.get('num_t_mask', 2)
     num_f_mask = config.get('num_f_mask', 2)
     max_t = config.get('max_t', 20)

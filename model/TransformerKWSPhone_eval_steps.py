@@ -66,9 +66,9 @@ class TransformerKWSPhone_eval_steps(nn.Module):
         self,
         audio_net_config,
         kw_net_config,
-        num_audio_block=4,
-        num_kw_block=4,
-        num_au_kw_block=4,
+        num_audio_self_block=4,
+        num_kw_self_block=4,
+        num_au_kw_cross_block=4,
         sok=1,
         eok=1,
         batch_padding_idx=-1,
@@ -119,7 +119,7 @@ class TransformerKWSPhone_eval_steps(nn.Module):
                 size=au_hidden_dim,
                 self_att=au_self_att(**au_self_att_cofing),
                 feed_forward=NM.FNNBlock(**au_feed_forward_config),
-            ) for _ in range(num_audio_block - 1)
+            ) for _ in range(num_audio_self_block - 1)
         ])
 
         self.au_transformer_mid = nn.ModuleList([
@@ -136,7 +136,7 @@ class TransformerKWSPhone_eval_steps(nn.Module):
                 self_att=au_self_att(**au_self_att_cofing),
                 cross_att=au_cross_att(**au_cross_att_config),
                 feed_forward=NM.FNNBlock(**au_feed_forward_config),
-            ) for _ in range(num_au_kw_block)
+            ) for _ in range(num_au_kw_cross_block)
         ])
         #self.skip_trans = nn.ModuleList([nn.Linear(au_hidden_dim, au_hidden_dim) for _ in range(num_audio_block // 2 - 1)])
 
@@ -151,7 +151,7 @@ class TransformerKWSPhone_eval_steps(nn.Module):
                 size=kw_hidden_dim,
                 self_att=kw_self_att(**kw_self_att_cofing),
                 feed_forward=NM.FNNBlock(**kw_feed_forward_config)
-            ) for _ in range(num_kw_block)
+            ) for _ in range(num_kw_self_block)
         ])
         if kw_hidden_dim != au_hidden_dim:
             self.kw_au_link = nn.Linear(kw_hidden_dim, au_hidden_dim)

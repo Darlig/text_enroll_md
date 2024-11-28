@@ -106,6 +106,8 @@ def deletion_neg(positive_keyword: List[int], negative_keyword: List[int]) -> Li
     if len(positive_keyword) > 3:
         n_del = 2
     positive_keyword = unfold_list(positive_keyword)
+    if len(positive_keyword) < 3: # in case of word with only final but no initial
+        return positive_keyword
     positive_idx = [x for x in range(1, len(positive_keyword)-1)] 
     del_idx = random.sample(positive_idx, k=n_del)
     keyword = [positive_keyword[x]  for x in range(len(positive_keyword)) if x not in del_idx]
@@ -236,25 +238,35 @@ def random_one(pools: List[int], pool_len: int) -> Tuple[List]:
 
 # spec augmentation
 def spec_augment(
-        spec: torch.Tensor, num_t_mask: int=2, num_f_mask: int=2, max_t: int=20, max_f: int=10
+        spec: torch.Tensor, config: Dict
     ) -> torch.Tensor:
     assert isinstance(spec, torch.Tensor)
+    num_t_mask = config.get('num_t_mask', 2)
+    num_f_mask = config.get('num_f_mask', 2)
+    max_t = config.get('max_t', 20)
+    max_f = config.get('max_f', 10)
+    spec_prob = config.get('spec_prob', 0.5)
     aug_spec = spec.clone().detach()
-    max_frames = aug_spec.size(0)
-    max_freq = aug_spec.size(1)
-    # time mask
-    for i in range(num_t_mask):
-        start = np.random.randint(0, max_frames - 1)
-        length = np.random.randint(1, max_t)
-        end = min(max_frames, start + length)
-        aug_spec[start:end, :] = 0
-    # freq mask
-    for i in range(num_f_mask):
-        start = np.random.randint(0, max_freq - 1)
-        length = np.random.randint(1, max_f)
-        end = min(max_freq, start + length)
-        aug_spec[:, start:end] = 0
-    return aug_spec
+    if random.uniform(0, 1) > spec_prob:
+        return aug_spec
+    else:
+        max_frames = aug_spec.size(0)
+        max_freq = aug_spec.size(1)
+        # print("max_frames: {}, max_freq: {}".format(max_frames, max_freq))
+        # time mask
+        for i in range(num_t_mask):
+            start = np.random.randint(0, max_frames - 1)
+            length = np.random.randint(1, max_t)
+            end = min(max_frames, start + length)
+            aug_spec[start:end, :] = 0
+        # freq mask
+        for i in range(num_f_mask):
+            start = np.random.randint(0, max_freq - 1)
+            length = np.random.randint(1, max_f)
+            end = min(max_freq, start + length)
+            aug_spec[:, start:end] = 0
+            # print("start: {}, end: {}".format(start, end))
+        return aug_spec
 
 # Speech augmentation: reverb, change speed
 def wav_augment(
@@ -559,11 +571,11 @@ def inject_special_token(
         new_phn_label[keyword_pos: keyword_pos+keyword_length] = new_keyword
         if bpe_label:
             bpe_kw_head = bpe_candidate[keyword_pos]
-            bpe_kw_tail = bpe_candidate[keyword_pos+keyword_length]
-            bpe_kw = bpe_label[bpe_kw_head: bpe_kw_tail] # keyword in bpe label
+            bpe_kw_tail = bpe_candidate[keyword_pos + keyword_length - 1] # max index = offset + length - 1
+            bpe_kw = bpe_label[bpe_kw_head: bpe_kw_tail + 1] # keyword in bpe label
             bpe_kw.insert(0, [TEXT_SPEC_TOKEN['sok']])
             bpe_kw.insert(len(bpe_kw), [TEXT_SPEC_TOKEN['eok']])
-            new_bpe_label[bpe_kw_head: bpe_kw_tail] = bpe_kw
+            new_bpe_label[bpe_kw_head: bpe_kw_tail + 1] = bpe_kw
 
     return (new_keyword, new_phn_label, new_bpe_label, keyword_pos)
 
@@ -595,6 +607,12 @@ def make_keyword(
         else:
             neg_func_idx = 4
         keyword = NEG_FAMILY[neg_func_idx](positive_keyword, full_neg_keyword)
+        # check if neg keyword in pos labels
+        flatten_neg = int2sym(unfold_list(keyword))
+        flatten_pos = int2sym(unfold_list(positive_label))
+        if (" {} ".format(" ".join(flatten_neg)) in " {} ".format(" ".join(flatten_pos))):
+            print("make_keyword() -> neg keyword in pos labels, neg_keyword: {}, pos_labels: {}".format(keyword, positive_label))
+            keyword = full_neg_keyword
         keyword_pos = -1
         pos = False
         target = torch.tensor([0])
@@ -626,12 +644,11 @@ def make_keyword_dump(sample, positive_prob, neg_len=None):
 def sample_kw_from_label(label: List, kw_candidate: List=None, max_keyword_len: int=6)->Tuple[List, int]:
     kw_len = random.randint(2, max_keyword_len)
     if kw_candidate: #TODO: a little bit confuse ...  optim it latter
-        kw_len = kw_len if kw_len < len(kw_candidate) else 1
-        kw_pos_idx = random.randint(0, len(kw_candidate)-kw_len-1) if len(kw_candidate) > kw_len+1 else 0
+        if kw_len > len(kw_candidate):
+            kw_len = 1
+        kw_pos_idx = random.randint(0, len(kw_candidate) - kw_len)
         kw_pos = kw_candidate[kw_pos_idx]
-        if kw_pos_idx+kw_len >= len(kw_candidate):
-            kw_len -= 1 
-        kw_len = kw_candidate[kw_pos_idx+kw_len] - kw_pos
+        kw_len = kw_candidate[kw_pos_idx + kw_len - 1] - kw_pos + 1
     else:
         kw_pos = random.randint(0, len(label)-kw_len) if len(label) > kw_len else 0
     kw = label[kw_pos: kw_pos + kw_len]

@@ -13,6 +13,8 @@ from torch.nn.utils import clip_grad_norm_
 from yamlinclude import YamlIncludeConstructor
 from data.loader.data_loader import Dataset
 from local.utils import WarmUpLR, read_list, Recorder
+from torch.utils.tensorboard import SummaryWriter
+import shutil
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -121,6 +123,16 @@ class Trainer():
             # exp config backup in expdir
             ef = open("{}/exp.yaml".format(self.exp_config['exp_dir']), 'w')
             yaml.dump(self.exp_config, ef)
+            # data process code backup in expdir
+            data = "{}/data/".format(self.exp_config['exp_dir'])
+            if os.path.exists(data):
+                shutil.rmtree(data)
+            shutil.copytree("data", data, symlinks=True)
+            # model structure code backup in expdir
+            model = "{}/model/".format(self.exp_config['exp_dir'])
+            if os.path.exists(model):
+                shutil.rmtree(model)
+            shutil.copytree("model", model, symlinks=True)
 
     def compute_redundancy(self, n):
         r1 = n % self.world_size
@@ -205,11 +217,18 @@ class Trainer():
         )
 
         start_epoch = self.data_config.get('start_epoch', 0)
+        tensorboard_dir = 'tensorboard/{}'.format(self.exp_config['exp_dir'])
         if start_epoch != 0:
             ckpt = self.load_endpoint(self.data_config['start_epoch']-1)
             self.global_step = self.load_ckpt(ckpt)
+            if self.rank == 0:
+                self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train', purge_step=self.global_step)
+                self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv', purge_step=start_epoch)
         else:
             self.global_step = 0
+            if self.rank == 0:
+                self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train')
+                self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv')
         self.scheduler = WarmUpLR(self.optim, warmup_steps=warm_up_peak_step)
         self.scheduler.set_step(self.global_step)
         if self.exp_config.get('finetune', False):
@@ -325,7 +344,7 @@ class Trainer():
             d_model = d_model.state_dict()
         opt = opt.state_dict()
         return d_model, opt
-    
+
     def record_step(self, r_loss):
         assert (isinstance(r_loss, dict))
         for key, value in r_loss.items():
@@ -334,6 +353,8 @@ class Trainer():
                 value, self.epoch, self.global_step,
                 model=None, opt=None, tag=key
             )
+            for loss_key, loss_value in value.items():
+                self.tb_writer_train.add_scalar('{}/{}'.format(loss_key, key), loss_value, self.global_step)
     
     def record_epoch(self, cv_loss=None):
         model, opt = self.detach_state_dict()
@@ -341,6 +362,8 @@ class Trainer():
             self.epoch, self.global_step,
             model, opt, cv_loss
         )
+        for loss_key, loss_value in cv_loss.items():
+            self.tb_writer_cv.add_scalar('{}/{}'.format(loss_key, 'cv'), loss_value, self.epoch)
 
     def load_endpoint(self, epoch):
         exp_dir = self.exp_config['exp_dir']

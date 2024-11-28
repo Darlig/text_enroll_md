@@ -41,8 +41,9 @@ model_config:
       self_att: MultiHeadAtt
       self_att_config: *att_common
       feed_forward_config: *feed_forward_common
-  num_audio_block: 8
-  num_kw_block: 4
+  num_audio_self_block: 4
+  num_kw_self_block: 4
+  num_au_kw_cross_block: 4
   sok: 1
   eok: 2
   loss_weight: [0.3, 0.1, 0.3]

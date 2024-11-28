@@ -221,12 +221,14 @@ class Trainer():
         if start_epoch != 0:
             ckpt = self.load_endpoint(self.data_config['start_epoch']-1)
             self.global_step = self.load_ckpt(ckpt)
-            self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train', purge_step=self.global_step)
-            self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv', purge_step=start_epoch)
+            if self.rank == 0:
+                self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train', purge_step=self.global_step)
+                self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv', purge_step=start_epoch)
         else:
             self.global_step = 0
-            self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train')
-            self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv')
+            if self.rank == 0:
+                self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train')
+                self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv')
         self.scheduler = WarmUpLR(self.optim, warmup_steps=warm_up_peak_step)
         self.scheduler.set_step(self.global_step)
         if self.exp_config.get('finetune', False):

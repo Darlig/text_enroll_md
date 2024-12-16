@@ -343,7 +343,7 @@ class TransformerKWSPhone_nocross(nn.Module):
             mask=kw_mask,
         )
         sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
-        sph_kw_emb = torch.cat([sph_emb, kw_emb], dim=1)
+        sph_kw_emb = torch.cat([kw_emb, sph_emb], dim=1)
         sph_kw_emb = self.au_kw_pos_emb(sph_kw_emb)
         sph_kw_emb = self.forward_au_kw_transformer(sph_kw_emb, mask=None)
 

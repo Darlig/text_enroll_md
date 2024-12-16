@@ -72,14 +72,12 @@ class TransformerKWSPhone_nocross(nn.Module):
         num_au_kw_concat_block=4,
         sok=1,
         eok=1,
-        batch_padding_idx=-1,
-        loss_weight=[0.3,0.6,0.1],
+        loss_weight=1.0,
         **kwargs,
     ):
         super(TransformerKWSPhone_nocross, self).__init__()
         self.sok = sok
         self.eok = eok
-        self.batch_padding_idx = batch_padding_idx
         # detach_config 
         # TODO: looks stupid ....   >_<
         # audio config
@@ -87,8 +85,6 @@ class TransformerKWSPhone_nocross(nn.Module):
         au_transformer_config = audio_net_config['transformer_config']
         au_self_att = att_dict[au_transformer_config['self_att']]
         au_self_att_cofing = au_transformer_config['self_att_config']
-        au_cross_att = att_dict[au_transformer_config['cross_att']]
-        au_cross_att_config = au_transformer_config['corss_att_config']
         au_feed_forward_config = au_transformer_config['feed_forward_config']
         au_hidden_dim = au_transformer_config['size']
 
@@ -137,24 +133,6 @@ class TransformerKWSPhone_nocross(nn.Module):
             ) for _ in range(num_au_kw_concat_block)
         ])
 
-        # self.au_transformer_mid = nn.ModuleList([
-        #     NM.TransformerLayer(
-        #         size=au_hidden_dim,
-        #         self_att=au_self_att(**au_self_att_cofing),
-        #         feed_forward=NM.FNNBlock(**au_feed_forward_config),
-        #     ) for idx in range(1)
-        # ])
-
-        #self.au_transformer_high = nn.ModuleList([
-        #    NM.TransformerLayer(
-        #        size=au_hidden_dim,
-        #        self_att=au_self_att(**au_self_att_cofing),
-        #        cross_att=au_cross_att(**au_cross_att_config),
-        #        feed_forward=NM.FNNBlock(**au_feed_forward_config),
-        #    ) for _ in range(num_au_kw_concat_block)
-        #])
-        #self.skip_trans = nn.ModuleList([nn.Linear(au_hidden_dim, au_hidden_dim) for _ in range(num_audio_block // 2 - 1)])
-
         # kw net
         self.phn_emb = NM.WordEmbedding(
             num_tokens=num_phn_token, dim=kw_transformer_config['size']
@@ -173,7 +151,6 @@ class TransformerKWSPhone_nocross(nn.Module):
         else:
             self.kw_au_link = nn.Identity()
 
-        self.location_cross_att = NM.MultiHeadCrossAtt(**au_cross_att_config)
         self.det_net = nn.Sequential(
             NM.FNNBlock(**au_feed_forward_config), nn.Linear(au_hidden_dim, 1), nn.Sigmoid()
         )
@@ -187,9 +164,8 @@ class TransformerKWSPhone_nocross(nn.Module):
             'num_tokens': num_phn_token,
             'front_output_size': au_hidden_dim 
         }
-        self.l1, self.l2, self.l3 = loss_weight
+        self.l2 = loss_weight
         self.det_crit = nn.BCELoss(reduction='mean')
-        self.phn_asr_crit = NM.CTC(**phn_ctc_conf)
 
     def forward_transformer(
         self,
@@ -241,24 +217,6 @@ class TransformerKWSPhone_nocross(nn.Module):
         gau_loss = aux_target1 + aux_target2*gau_loss
         return gau_loss 
     
-    #def forward_unet(self, input, mask=None, cross_embedding=None):
-    #    #res = {}
-    #    for i, tf_layer in enumerate(self.au_transformer):
-    #        input, att_score = tf_layer(input, mask, cross_input=None)
-    #        #res[i] = input
-    #    
-    #    for i, tf_layer in enumerate(self.au_transformer_mid):
-    #        input, att_score = tf_layer(input, mask, cross_input=None)
-    #    
-    #    # revers res
-    #    #num_res = len(res)
-    #    #r_res = {i: res[num_res - i - 1] for i in range(num_res)}
-    #    
-    #    for i, tf_layer in enumerate(self.au_transformer_high):
-    #        #input = self.skip_trans[i](input + r_res[i])
-    #        input, att_score = tf_layer(input, mask, cross_input=cross_embedding)
-    #    return input
-    
 
     def forward_au_transformer(self, input, mask=None):
         #res = {}
@@ -266,19 +224,14 @@ class TransformerKWSPhone_nocross(nn.Module):
             input, att_score = tf_layer(input, mask, cross_input=None)
             #res[i] = input
         
-        #for i, tf_layer in enumerate(self.au_transformer_mid):
-        #    input, att_score = tf_layer(input, mask, cross_input=None)
-        
         return input
-    
+
+
     def forward_au_kw_transformer(self, input, mask=None):
         #res = {}
         for i, tf_layer in enumerate(self.au_kw_transformer):
             input, att_score = tf_layer(input, mask, cross_input=None)
             #res[i] = input
-        
-        #for i, tf_layer in enumerate(self.au_kw_transformer_mid):
-        #    input, att_score = tf_layer(input, mask, cross_input=None)
         
         return input
     
@@ -317,13 +270,12 @@ class TransformerKWSPhone_nocross(nn.Module):
 
     def forward(self, input_data):
 
-        sph_input, sph_len, phn_label, phn_len, kw_label, kw_len, target = input_data
+        sph_input, sph_len, _, _, kw_label, kw_len, target = input_data
         b,t,d = sph_input.size()
         sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
         sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
         sph_mask = ~NM.make_mask(sph_len).unsqueeze(1)
         kw_mask = ~NM.make_mask(kw_len).unsqueeze(1)
-        # cross_mask = ~NM.combine_mask(sph_mask.squeeze(1), kw_mask.squeeze(1), 1)
 
         # embedding
         sph_emb = self.au_conv(sph_input.unsqueeze(1))
@@ -347,30 +299,14 @@ class TransformerKWSPhone_nocross(nn.Module):
         sph_kw_emb = self.au_kw_pos_emb(sph_kw_emb)
         sph_kw_emb = self.forward_au_kw_transformer(sph_kw_emb, mask=None)
 
-        # # asr loss
-        # phn_ctc_loss, phn_asr_hyp = self.phn_asr_crit(
-        #     sph_emb, phn_label, sph_len, phn_len, return_hyp=True
-        # )
-
-        # # pos loss
-        # kw_pos_mask = self.predict_kw_mask(phn_asr_hyp.transpose(0,1))
-        # cross_context, cross_att = self.location_cross_att(
-        #     kw_emb, sph_emb, sph_emb, mask=cross_mask.transpose(-2,-1), aux_score=kw_pos_mask
-        # )
-        # align_loss = self.make_align_loss(cross_att, kw_len, sph_len, cross_mask, target)
-        # align_loss = torch.mean(align_loss)
-
         # detection loss
         det_result = self.det_net(sph_kw_emb[:,0,:])
         det_loss = self.det_crit(det_result, target.to(torch.float32))
 
         # decoder output 
         total_loss = det_loss
-        # total_loss = (0.3 * phn_ctc_loss) + (0.6 * det_loss) + (0.1 * align_loss)
         detail_loss = {
-            # 'phn_ctc_loss': phn_ctc_loss.clone().detach(),
             'det_loss': det_loss.clone().detach()
-            # 'align_loss': align_loss.clone().detach()
         }
         return total_loss, detail_loss
     

@@ -8,6 +8,7 @@ from model import TransformerKWSPhone
 from model import TransformerKWSPhone_noaliloss
 from model import TransformerKWSPhone_eval_steps
 from model import TransformerKWSPhone_nocross
+from model import TransformerKWSPhone_nocross_w_ctc
 
 m_dict = {
     'AEDKWSASR': AEDKWSASR.AEDKWSASR,
@@ -17,5 +18,6 @@ m_dict = {
     'TransformerKWSPhone': TransformerKWSPhone.TransformerKWSPhone,
     'TransformerKWSPhone_noaliloss': TransformerKWSPhone_noaliloss.TransformerKWSPhone_noaliloss,
     'TransformerKWSPhone_eval_steps': TransformerKWSPhone_eval_steps.TransformerKWSPhone_eval_steps,
-    'TransformerKWSPhone_nocross': TransformerKWSPhone_nocross.TransformerKWSPhone_nocross
+    'TransformerKWSPhone_nocross': TransformerKWSPhone_nocross.TransformerKWSPhone_nocross,
+    'TransformerKWSPhone_nocross_w_ctc': TransformerKWSPhone_nocross_w_ctc.TransformerKWSPhone_nocross_w_ctc
 }

@@ -298,17 +298,22 @@ class TransformerKWSPhone_nocross(nn.Module):
         sph_kw_emb = torch.cat([kw_emb, sph_emb], dim=1)
         sph_kw_mask = torch.cat([kw_mask, sph_mask], dim=-1)
         sph_kw_emb = self.au_kw_pos_emb(sph_kw_emb)
-        sph_kw_emb = self.forward_au_kw_transformer(sph_kw_emb, mask=sph_kw_mask)
+        det_loss = 0
+        detail_loss = {}
+        for i, tf_layer in enumerate(self.au_kw_transformer):
+            sph_kw_emb_layer, att_score_layer = tf_layer(sph_kw_emb, sph_kw_mask, cross_input=None)
 
-        # detection loss
-        det_result = self.det_net(sph_kw_emb[:,0,:])
-        det_loss = self.det_crit(det_result, target.to(torch.float32))
+            # detection loss
+            det_result_layer = self.det_net(sph_kw_emb_layer[:,0,:])
+            det_loss_layer = self.det_crit(det_result_layer, target.to(torch.float32))
+            det_loss += det_loss_layer / len(self.au_kw_transformer)
+            detail_loss['det_loss_layer_{}'.format(i)] = det_loss_layer.clone().detach()
 
         # decoder output 
         total_loss = det_loss
-        detail_loss = {
-            'det_loss': det_loss.clone().detach()
-        }
+        # detail_loss = {
+        #     'det_loss': det_loss.clone().detach()
+        # }
         return total_loss, detail_loss
     
 

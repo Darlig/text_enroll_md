@@ -335,7 +335,6 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
         sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
         sph_mask = ~NM.make_mask(sph_len).unsqueeze(1)
         kw_mask = ~NM.make_mask(kw_len).unsqueeze(1)
-        cross_mask = ~NM.combine_mask(sph_mask.squeeze(1), kw_mask.squeeze(1), 1)
 
         # embedding
         sph_emb = self.au_conv(sph_input.unsqueeze(1))
@@ -354,17 +353,78 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
             kw_emb,
             mask=kw_mask,
         )
-        sph_emb = self.forward_unet(sph_emb, mask=sph_mask, cross_embedding=(kw_emb, kw_emb, cross_mask))
+        sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
+        sph_kw_emb = torch.cat([kw_emb, sph_emb], dim=1)
+        sph_kw_mask = torch.cat([kw_mask, sph_mask], dim=-1)
+        for i, tf_layer in enumerate(self.au_kw_transformer):
+            sph_kw_emb, _ = tf_layer(sph_kw_emb, sph_kw_mask, cross_input=None)
+
+            det_result = self.det_net(sph_kw_emb[:,0,:])
+        
+        sph_emb = sph_kw_emb[:,kw_emb.size(1):,:]
 
         phn_asr_hyp = self.phn_asr_crit.get_hyp(sph_emb)
 
-        kw_pos_mask = self.predict_kw_mask(phn_asr_hyp)
-        cross_context, cross_att = self.location_cross_att(
-            kw_emb, sph_emb, sph_emb, mask=cross_mask.transpose(-2,-1), aux_score=kw_pos_mask
+
+        # decoder output 
+        return det_result, phn_asr_hyp
+
+
+    @torch.no_grad()
+    def evaluate_sph_emb(self, input_data):
+        sph_input, sph_len = input_data
+        b,t,d = sph_input.size()
+        sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
+        sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
+        sph_mask = ~NM.make_mask(sph_len).unsqueeze(1)
+
+        # embedding
+        sph_emb = self.au_conv(sph_input.unsqueeze(1))
+        b, c, t, d = sph_emb.size()
+        sph_emb = self.au_conv_trans(sph_emb.transpose(1,2).contiguous().view(b, t, c * d))
+        sph_emb = self.au_trans(sph_emb)
+
+        # add position embedding
+        sph_emb = self.au_pos_emb(sph_emb)
+
+        sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
+
+        return sph_emb, sph_mask
+    
+    @torch.no_grad()
+    def evaluate_kw_emb(self, input_data):
+        kw_label, kw_len = input_data
+        kw_mask = ~NM.make_mask(kw_len).unsqueeze(1)
+
+        # embedding
+        kw_emb = self.phn_emb(kw_label.to(torch.long))
+        kw_emb = self.kw_trans(kw_emb)
+
+        # add position embedding
+        kw_emb = self.kw_pos_emb(kw_emb)
+
+        kw_emb = self.forward_transformer(
+            self.kw_transformer,
+            kw_emb,
+            mask=kw_mask,
         )
 
-        # detection result
-        det_result = self.det_net(cross_context[:,0,:])
+        return kw_emb, kw_mask
+    
+    @torch.no_grad()
+    def evaluate_concat_attention(self, input_data):
+        sph_emb, sph_mask, kw_emb, kw_mask = input_data
+
+        sph_kw_emb = torch.cat([kw_emb, sph_emb], dim=1)
+        sph_kw_mask = torch.cat([kw_mask, sph_mask], dim=-1)
+        for i, tf_layer in enumerate(self.au_kw_transformer):
+            sph_kw_emb, _ = tf_layer(sph_kw_emb, sph_kw_mask, cross_input=None)
+
+            det_result = self.det_net(sph_kw_emb[:,0,:])
+
+        sph_emb = sph_kw_emb[:,kw_emb.size(1):,:]
+
+        phn_asr_hyp = self.phn_asr_crit.get_hyp(sph_emb)
 
         # decoder output 
         return det_result, phn_asr_hyp

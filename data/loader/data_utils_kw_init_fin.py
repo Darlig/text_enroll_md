@@ -539,9 +539,10 @@ def make_segment(
 
 
 # detach corruption
-def detach_corruption(material: Dict) -> Tuple[List, List, List, List, List, List]:
+def detach_corruption(material: Dict) -> Tuple[List, List, List, List, List, List, List]:
     keywords = [] 
     phn_labels = []
+    segment_labels = []
     bpe_labels = []
     labels = []
     kw_candidates = []
@@ -553,13 +554,15 @@ def detach_corruption(material: Dict) -> Tuple[List, List, List, List, List, Lis
             labels.append(info['label'])
         if 'phn_label' in info:
             phn_labels.append(info['phn_label'])
+        if 'segment_label' in info:
+            segment_labels.append(info['segment_label'])
         if 'bpe_label' in info:
             bpe_labels.append(info['bpe_label'])
         if 'b_kw_candidate' in info:
             b_kw_candidates.append(info['b_kw_candidate'])
         if 'kw_candidate' in info:
             kw_candidates.append(info['kw_candidate'])
-    return keywords, labels, phn_labels, bpe_labels, kw_candidates, b_kw_candidates
+    return keywords, labels, phn_labels, segment_labels, bpe_labels, kw_candidates, b_kw_candidates
 
 # insert special token in label sequence such as SOS: 0(start of sentence) 
 # 1 2 3 4 5 -> "0" 1 2 3 4 5
@@ -609,12 +612,12 @@ def snipe_edge(waveform: torch.Tensor, hop_length: int=160):
     return waveform[:,0:num_samples-edges]
 
 def make_keyword(
-        candidate_seq: List[Any],
+        candidate_seq: List[Any], segment_seq: List[Any],
         positive_prob: float, num_pre_sample: Optional[int]=None, kw_position_candidate: List=None,
         corrupt_label: List=None, min_keyword_len: int=2, max_keyword_len: int=6, aux_lexicon: Dict=None
     ) -> Tuple[List, int, int, bool, int]:
 
-    keyword, keyword_pos = sample_kw_from_label(candidate_seq, kw_position_candidate, min_keyword_len, max_keyword_len)
+    keyword, keyword_pos = sample_kw_from_label(candidate_seq, segment_seq, kw_position_candidate, min_keyword_len, max_keyword_len)
     pos = True
     target = torch.tensor([1])
 
@@ -664,17 +667,18 @@ def make_keyword_dump(sample, positive_prob, neg_len=None):
     return kw, kw_pos, len(kw), pos, target
 
 # sample positive keyword from asr label
-def sample_kw_from_label(label: List, kw_candidate: List=None, min_keyword_len: int=2, max_keyword_len: int=6)->Tuple[List, int]:
-    kw_len = random.randint(min_keyword_len, max_keyword_len)
-    if kw_candidate: #TODO: a little bit confuse ...  optim it latter
-        if kw_len > len(kw_candidate):
-            kw_len = 1
-        kw_pos_idx = random.randint(0, len(kw_candidate) - kw_len)
-        kw_pos = kw_candidate[kw_pos_idx]
-        kw_len = kw_candidate[kw_pos_idx + kw_len - 1] - kw_pos + 1
-    else:
-        kw_pos = random.randint(0, len(label)-kw_len) if len(label) > kw_len else 0
-    kw = label[kw_pos: kw_pos + kw_len]
+def sample_kw_from_label(label: List, segment: List, kw_candidate: List=None, min_keyword_len: int=2, max_keyword_len: int=6)->Tuple[List, int]:
+    match_len = 0
+    while match_len == 0:
+        seg_len = len(segment)
+        seg_pos = random.randint(0, seg_len-1)
+        kw = segment[seg_pos]
+        kw_len = len(kw)
+        if kw_len >= min_keyword_len and kw_len <= max_keyword_len:
+            match_len = 1
+        kw_pos = 0
+        for i in range(seg_pos):
+            kw_pos += len(segment[i])
     return (kw, kw_pos)
 
 # sample negative keyword from the whole corpus

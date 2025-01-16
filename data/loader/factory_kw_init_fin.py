@@ -404,12 +404,13 @@ def process_sampled_keyword_from_label(
     TEXT_SPEC_TOKEN.update(special_token)
     for sample in data:
         new_phn_label = copy.deepcopy(sample['phn_label'])
+        new_segment_label = copy.deepcopy(sample['segment_label'])
         new_bpe_label = copy.deepcopy(sample['bpe_label'])
         bpe_candidate = copy.deepcopy(sample['b_kw_candidate'])
         num_pre_sample = 5
         corrupt_label = None if 'mix_phn_label' not in sample else sample['mix_phn_label']
         kw, kw_pos, kw_length, pos, target = utils.make_keyword(
-            candidate_seq=new_phn_label,
+            candidate_seq=new_phn_label, segment_seq=new_segment_label,
             positive_prob=positive_prob, num_pre_sample=num_pre_sample, kw_position_candidate=sample['kw_candidate'],
             corrupt_label=corrupt_label, min_keyword_len=min_keyword_len, max_keyword_len=max_keyword_len, aux_lexicon=aux_lexicon
         )

@@ -258,7 +258,8 @@ def process_speech_feats(data: Iterator[Dict], config: Dict[Any, Any]) -> Iterat
 def process_text_feats(data: Iterator[Dict]) -> Iterator[Dict]:
     for sample in data:
         if 'self_crpt_material' in sample:
-            c_keywords, c_labels, c_phn_labels, c_segment_labels, c_bpe_labels, kw_candidates, b_kw_candidates = utils.detach_corruption(
+            #c_keywords, c_labels, c_phn_labels, c_segment_labels, c_bpe_labels, kw_candidates, b_kw_candidates = utils.detach_corruption(
+            c_keywords, c_labels, c_phn_labels, c_bpe_labels, kw_candidates, b_kw_candidates = utils.detach_corruption(
                 sample['self_crpt_material']
             )
             if len(c_keywords) != 0:

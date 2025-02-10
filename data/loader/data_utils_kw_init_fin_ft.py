@@ -539,10 +539,11 @@ def make_segment(
 
 
 # detach corruption
-def detach_corruption(material: Dict) -> Tuple[List, List, List, List, List, List, List]:
+#def detach_corruption(material: Dict) -> Tuple[List, List, List, List, List, List, List]:
+def detach_corruption(material: Dict) -> Tuple[List, List, List, List, List, List]:
     keywords = [] 
     phn_labels = []
-    segment_labels = []
+    #segment_labels = []
     bpe_labels = []
     labels = []
     kw_candidates = []
@@ -554,15 +555,16 @@ def detach_corruption(material: Dict) -> Tuple[List, List, List, List, List, Lis
             labels.append(info['label'])
         if 'phn_label' in info:
             phn_labels.append(info['phn_label'])
-        if 'segment_label' in info:
-            segment_labels.append(info['segment_label'])
+        #if 'segment_label' in info:
+        #    segment_labels.append(info['segment_label'])
         if 'bpe_label' in info:
             bpe_labels.append(info['bpe_label'])
         if 'b_kw_candidate' in info:
             b_kw_candidates.append(info['b_kw_candidate'])
         if 'kw_candidate' in info:
             kw_candidates.append(info['kw_candidate'])
-    return keywords, labels, phn_labels, segment_labels, bpe_labels, kw_candidates, b_kw_candidates
+    return keywords, labels, phn_labels, bpe_labels, kw_candidates, b_kw_candidates
+    #return keywords, labels, phn_labels, segment_labels, bpe_labels, kw_candidates, b_kw_candidates
 
 # insert special token in label sequence such as SOS: 0(start of sentence) 
 # 1 2 3 4 5 -> "0" 1 2 3 4 5

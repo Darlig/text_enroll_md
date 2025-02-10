@@ -249,7 +249,8 @@ def process_speech_feats(data: Iterator[Dict], config: Dict[Any, Any]) -> Iterat
 def process_text_feats(data: Iterator[Dict]) -> Iterator[Dict]:
     for sample in data:
         if 'self_crpt_material' in sample:
-            c_keywords, c_labels, c_phn_labels, c_segment_labels, c_bpe_labels, kw_candidates, b_kw_candidates = utils.detach_corruption(
+            #c_keywords, c_labels, c_phn_labels, c_segment_labels, c_bpe_labels, kw_candidates, b_kw_candidates = utils.detach_corruption(
+            c_keywords, c_labels, c_phn_labels, c_bpe_labels, kw_candidates, b_kw_candidates = utils.detach_corruption(
                 sample['self_crpt_material']
             )
             if len(c_keywords) != 0:
@@ -668,6 +669,18 @@ def make_batch(data, batch_size=256):
     for sample in data:
         buf.append(sample)
         if len(buf) >= batch_size:
+            yield buf
+            buf = []
+    if len(buf) > 0:
+        yield buf
+
+def make_dynamic_batch(data, batch_size=1024):
+    buf = []
+    current_len = 0
+    for sample in data:
+        current_len += sample['mixspeech_len']
+        buf.append(sample)
+        if current_len >= batch_size:
             yield buf
             buf = []
     if len(buf) > 0:

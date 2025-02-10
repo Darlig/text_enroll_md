@@ -105,8 +105,17 @@ def substitution_neg(positive_keyword: List[int], aux_lexicon: Dict, negative_ke
                     return positive_keyword
                 one_sub_word = [one_sub_init[0], pos_final]
             else:
-                candidate_final = [ f for f in lexicon_by_init[str(pos_init)] if f != pos_final ]
-                one_sub_final = random.sample(candidate_final, k=1)
+                try:
+                    candidate_final = [ f for f in lexicon_by_init[str(pos_init)] if f != pos_final ]
+                    if len(candidate_final) < 2:
+                        return positive_keyword
+                except:
+                    print("get final list by init error: init: {}, final: {}".format(pos_init, pos_final))
+                    return positive_keyword
+                try:
+                    one_sub_final = random.sample(candidate_final, k=1)
+                except:
+                    print("final sample error: candidate_final: {}, lexicon_by_init[str(pos_init)]: {}, init: {}".format(candidate_final, lexicon_by_init[str(pos_init)], pos_init))
                 one_sub_word = [pos_init, one_sub_final[0]]
             keyword.append(unfold_list(one_sub_word))
     #print("sub neg positive_keyword: {}, sample_neg: {}".format(positive_keyword, keyword))
@@ -539,10 +548,11 @@ def make_segment(
 
 
 # detach corruption
-def detach_corruption(material: Dict) -> Tuple[List, List, List, List, List, List, List]:
+#def detach_corruption(material: Dict) -> Tuple[List, List, List, List, List, List, List]:
+def detach_corruption(material: Dict) -> Tuple[List, List, List, List, List, List]:
     keywords = [] 
     phn_labels = []
-    segment_labels = []
+    #segment_labels = []
     bpe_labels = []
     labels = []
     kw_candidates = []
@@ -554,15 +564,16 @@ def detach_corruption(material: Dict) -> Tuple[List, List, List, List, List, Lis
             labels.append(info['label'])
         if 'phn_label' in info:
             phn_labels.append(info['phn_label'])
-        if 'segment_label' in info:
-            segment_labels.append(info['segment_label'])
+        #if 'segment_label' in info:
+        #    segment_labels.append(info['segment_label'])
         if 'bpe_label' in info:
             bpe_labels.append(info['bpe_label'])
         if 'b_kw_candidate' in info:
             b_kw_candidates.append(info['b_kw_candidate'])
         if 'kw_candidate' in info:
             kw_candidates.append(info['kw_candidate'])
-    return keywords, labels, phn_labels, segment_labels, bpe_labels, kw_candidates, b_kw_candidates
+    return keywords, labels, phn_labels, bpe_labels, kw_candidates, b_kw_candidates
+    #return keywords, labels, phn_labels, segment_labels, bpe_labels, kw_candidates, b_kw_candidates
 
 # insert special token in label sequence such as SOS: 0(start of sentence) 
 # 1 2 3 4 5 -> "0" 1 2 3 4 5
@@ -668,18 +679,27 @@ def make_keyword_dump(sample, positive_prob, neg_len=None):
 
 # sample positive keyword from asr label
 def sample_kw_from_label(label: List, segment: List, kw_candidate: List=None, min_keyword_len: int=2, max_keyword_len: int=6)->Tuple[List, int]:
-    match_len = 0
-    while match_len == 0:
-        seg_len = len(segment)
-        seg_pos = random.randint(0, seg_len-1)
-        kw = segment[seg_pos]
-        kw_len = len(kw)
-        if kw_len >= min_keyword_len and kw_len <= max_keyword_len:
-            match_len = 1
-        kw_pos = 0
-        for i in range(seg_pos):
-            kw_pos += len(segment[i])
+    #match_len = 0
+    #while match_len == 0:
+    #segment = set_length_range(segment, min_keyword_len, max_keyword_len)
+    seg_len = len(segment)
+    seg_pos = random.randint(0, seg_len-1)
+    kw = segment[seg_pos]
+    kw_len = len(kw)
+    if kw_len >= min_keyword_len and kw_len <= max_keyword_len:
+        match_len = 1
+    kw_pos = 0
+    for i in range(seg_pos):
+        kw_pos += len(segment[i])
     return (kw, kw_pos)
+
+#def set_length_range(segment: List, min_keyword_len: int, max_keyword_len: int)->List:
+#    new_segment = []
+#    for seg in segment:
+#        if len(seg) >= min_keyword_len and len(seg) <= max_keyword_len:
+#            new_segment.append(seg)
+#
+#    return new_segment
 
 # sample negative keyword from the whole corpus
 def random_one_neg(neg_list: List[int], neg_len: int, pos_label: List, spk_id: str=None)->List[int]:

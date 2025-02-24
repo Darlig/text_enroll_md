@@ -70,109 +70,6 @@ def tensor2str(t: torch.Tensor):
     t = list(map(lambda x: str(x), t))
     return t
 
-#def substitution_neg(positive_keyword: List[int], aux_lexicon: Dict, negative_keyword: List[int]) -> List[int]:
-#    #print("substitution_neg")
-#    n_sub = 1
-#    lexicon_by_init = aux_lexicon.get('by_init')
-#    lexicon_by_final = aux_lexicon.get('by_final')
-#    if len(positive_keyword) > 3:
-#        n_sub = random.randint(2, len(positive_keyword)-1)
-#    positive_idx = [x for x in range(len(positive_keyword))] 
-#    sub_idx = random.sample(positive_idx, k=n_sub)
-#    keyword = []
-#    for x, one_word in enumerate(positive_keyword):
-#        if x not in sub_idx:
-#            keyword.extend(unfold_list(one_word))
-#        elif len(one_word) != 2:
-#            keyword.extend(unfold_list(one_word))
-#            # keyword.append(one_word)
-#        else:
-#            pos_init = one_word[0]
-#            pos_final = one_word[1]
-#            is_sub_init = random.randint(0,1)
-#            if is_sub_init:
-#                try:
-#                    candidate_init = [ i for i in lexicon_by_final[str(pos_final)] if i != pos_init ]
-#                    if len(candidate_init) < 2:
-#                        return positive_keyword
-#                except:
-#                    print("get init list by final error: init: {}, final: {}".format(pos_init, pos_final))
-#                    return positive_keyword
-#                try:
-#                    one_sub_init = random.sample(candidate_init, k=1)
-#                except:
-#                    print("init sample error: candidate_init: {}, lexicon_by_final[str(pos_final)]: {}, final: {}".format(candidate_init, lexicon_by_final[str(pos_final)], pos_final))
-#                    return positive_keyword
-#                one_sub_word = [one_sub_init[0], pos_final]
-#            else:
-#                candidate_final = [ f for f in lexicon_by_init[str(pos_init)] if f != pos_final ]
-#                one_sub_final = random.sample(candidate_final, k=1)
-#                one_sub_word = [pos_init, one_sub_final[0]]
-#            keyword.append(unfold_list(one_sub_word))
-#    #print("sub neg positive_keyword: {}, sample_neg: {}".format(positive_keyword, keyword))
-#    return keyword
-
-#def deletion_neg(positive_keyword: List[int], aux_lexicon: Dict, negative_keyword: List[int]) -> List[int]:
-#    #print("deletion_neg")
-#    if len(positive_keyword) < 3:
-#        return positive_keyword
-#    n_del = 1
-#    if len(positive_keyword) > 3:
-#        n_del = 2
-#    positive_idx = [x for x in range(1, len(positive_keyword)-1)] 
-#    del_idx = random.sample(positive_idx, k=n_del)
-#    keyword = [positive_keyword[x]  for x in range(len(positive_keyword)) if x not in del_idx]
-#    keyword = unfold_list(keyword)
-#    #print("del neg positive_keyword: {}, sample_neg: {}".format(positive_keyword, keyword))
-#    return keyword
-#
-#def insertion_neg(positive_keyword: List[int], aux_lexicon: Dict, negative_keyword: List[int]) -> List[int]:
-#    #print("insertion_neg")
-#    char_phones = aux_lexicon.get('by_len')['1']
-#    n_insert = 1
-#    if len(positive_keyword) > 3:
-#        n_insert = 2
-#    positive_idx = [x for x in range(len(positive_keyword))] 
-#    insert_idx = random.sample(positive_idx, k=n_insert)
-#    keyword = []
-#    for i, k in enumerate(positive_keyword):
-#        keyword.append(k)
-#        if i in insert_idx:
-#            keyword.append(random.choice(char_phones))
-#    #print("ins neg positive_keyword: {}, sample_neg: {}".format(positive_keyword, keyword))
-#    return keyword
-#
-#def shuffle_neg(positive_keyword: List[int], aux_lexicon: Dict, negative_keyword: List[int]) -> List[int]:
-#    #print("shuffle_neg")
-#    keyword = positive_keyword[:]
-#    init_seq = []
-#    final_seq = []
-#    for char in positive_keyword:
-#        assert len(char) <= 2
-#        if len(char) == 2:
-#            init_seq.append(char[0])
-#            final_seq.append(char[1])
-#        else:
-#            init_seq.append(None)
-#            final_seq.append(char[0])
-#    shuffle_times = 0 
-#    while keyword == positive_keyword:
-#        shuffle_times += 1
-#        random.shuffle(init_seq)
-#        random.shuffle(final_seq)
-#        keyword = [[init_seq[i], final_seq[i]] if init_seq[i] != None else [final_seq[i]] for i in range(len(init_seq))]
-#        # random.shuffle(keyword)
-#        if shuffle_times > 10:
-#            break
-#    if shuffle_times > 10:
-#        keyword = negative_keyword[:]
-#    #print("shuf neg positive_keyword: {}, sample_neg: {}".format(positive_keyword, keyword))
-#    return keyword
-#
-#def full_neg(positive_keyword: List[int], aux_lexicon: Dict, negative_keyword: List[int]) -> List[int]:
-#    return negative_keyword
-
-#NEG_FAMILY = {0: substitution_neg, 1: deletion_neg, 2: insertion_neg, 3: shuffle_neg, 4: full_neg}
 
 
 # save wav as PCM_S 16bit 16k: always use to test code
@@ -539,11 +436,9 @@ def make_segment(
 
 
 # detach corruption
-#def detach_corruption(material: Dict) -> Tuple[List, List, List, List, List, List, List]:
 def detach_corruption(material: Dict) -> Tuple[List, List, List, List, List, List]:
     keywords = [] 
     phn_labels = []
-    #segment_labels = []
     bpe_labels = []
     labels = []
     kw_candidates = []
@@ -555,8 +450,6 @@ def detach_corruption(material: Dict) -> Tuple[List, List, List, List, List, Lis
             labels.append(info['label'])
         if 'phn_label' in info:
             phn_labels.append(info['phn_label'])
-        #if 'segment_label' in info:
-        #    segment_labels.append(info['segment_label'])
         if 'bpe_label' in info:
             bpe_labels.append(info['bpe_label'])
         if 'b_kw_candidate' in info:
@@ -564,7 +457,6 @@ def detach_corruption(material: Dict) -> Tuple[List, List, List, List, List, Lis
         if 'kw_candidate' in info:
             kw_candidates.append(info['kw_candidate'])
     return keywords, labels, phn_labels, bpe_labels, kw_candidates, b_kw_candidates
-    #return keywords, labels, phn_labels, segment_labels, bpe_labels, kw_candidates, b_kw_candidates
 
 # insert special token in label sequence such as SOS: 0(start of sentence) 
 # 1 2 3 4 5 -> "0" 1 2 3 4 5
@@ -577,10 +469,6 @@ def inject_special_token(
     new_phn_label = copy.deepcopy(label)
     new_bpe_label = copy.deepcopy(bpe_label) if bpe_label else [0]
     new_keyword = copy.deepcopy(keyword)
-    if (not positive) and (TEXT_SPEC_TOKEN['punk'] != None):
-        new_phn_label = torch.tensor([TEXT_SPEC_TOKEN['punk'] for x in range(len(new_phn_label)//3)])
-        if bpe_label:
-            new_bpe_label = torch.tensor([TEXT_SPEC_TOKEN['unk']  for x in range(len(new_bpe_label)//3)])
 
     if TEXT_SPEC_TOKEN['sos'] != None: # start of sentence
         new_phn_label = [TEXT_SPEC_TOKEN['sos']] + new_phn_label
@@ -598,12 +486,8 @@ def inject_special_token(
     if (TEXT_SPEC_TOKEN['with_trans']) and (positive): # modify keyword in label
         new_phn_label[keyword_pos: keyword_pos+keyword_length] = new_keyword
         if bpe_label:
-            bpe_kw_head = bpe_candidate[keyword_pos]
-            bpe_kw_tail = bpe_candidate[keyword_pos + keyword_length - 1] # max index = offset + length - 1
-            bpe_kw = bpe_label[bpe_kw_head: bpe_kw_tail + 1] # keyword in bpe label
-            bpe_kw.insert(0, [TEXT_SPEC_TOKEN['sok']])
-            bpe_kw.insert(len(bpe_kw), [TEXT_SPEC_TOKEN['eok']])
-            new_bpe_label[bpe_kw_head: bpe_kw_tail + 1] = bpe_kw
+            new_bpe_label.insert(0, [TEXT_SPEC_TOKEN['sok']])
+            new_bpe_label.insert(len(new_keyword), [TEXT_SPEC_TOKEN['eok']])
 
     return (new_keyword, new_phn_label, new_bpe_label, keyword_pos)
 
@@ -631,111 +515,3 @@ def make_keyword(
         target = torch.tensor([0])
     return (keyword, keyword_pos, len(keyword), pos, target)
 
-#def make_keyword(
-#        candidate_seq: List[Any], segment_seq: List[Any],
-#        positive_prob: float, num_pre_sample: Optional[int]=None, kw_position_candidate: List=None,
-#        corrupt_label: List=None, min_keyword_len: int=2, max_keyword_len: int=6, aux_lexicon: Dict=None
-#    ) -> Tuple[List, int, int, bool, int]:
-#
-#    keyword, keyword_pos = sample_kw_from_label(candidate_seq, segment_seq, kw_position_candidate, min_keyword_len, max_keyword_len)
-#    pos = True
-#    target = torch.tensor([1])
-#
-#    dice = random.uniform(0,1)
-#    if dice > positive_prob: # negtivae sample
-#        # when dice > positive prob means we need sample a negative keyword sample 
-#        # this keyword sample should not appeared in current speech and all the corruption speech
-#        positive_keyword = keyword[:]
-#        positive_label = candidate_seq + corrupt_label if corrupt_label else candidate_seq
-#        full_neg_keyword = random_one_neg_from_lexicon(aux_lexicon, min_keyword_len, max_keyword_len, num_pre_sample, positive_label)
-#        if len(positive_keyword) >= 2:
-#            neg_func_idx = random.randint(0,4)
-#        else:
-#            neg_func_idx = 4
-#        keyword = NEG_FAMILY[neg_func_idx](positive_keyword, aux_lexicon, full_neg_keyword)
-#        # check if neg keyword in pos labels
-#        flatten_neg = int2sym(unfold_list(keyword))
-#        flatten_pos = int2sym(unfold_list(positive_label))
-#        if (" {} ".format(" ".join(flatten_neg)) in " {} ".format(" ".join(flatten_pos))):
-#            print("make_keyword() -> neg keyword in pos labels, neg_keyword: {}, pos_labels: {}".format(keyword, positive_label))
-#            keyword = full_neg_keyword
-#        keyword_pos = -1
-#        pos = False
-#        target = torch.tensor([0])
-#    return (keyword, keyword_pos, len(keyword), pos, target)
-
-        
-## sample keyword from asr label, actually sample positive and make a negative
-#def make_keyword_dump(sample, positive_prob, neg_len=None):
-#    dice = random.uniform(0, 1)
-#    label = copy.deepcopy(sample['phn_label'])
-#    if dice > positive_prob: # negative sample
-#        if 'c_phn_label' in sample:
-#            crpt_label = sample['c_phn_label']
-#            mlabel = label + crpt_label
-#        else:
-#            mlabel = label
-#        kw = random_one_neg(sample['neg_candidate'], neg_len, mlabel, sample['key'].split('-')[0])
-#        kw_pos = -1
-#        pos = False
-#        target = torch.tensor([0])
-#    else: # positvie sample
-#        kw_candidate = sample.get('kw_candidate', None)
-#        kw, kw_pos = sample_kw_from_label(label, kw_candidate)
-#        pos = True
-#        target = torch.tensor([1])
-#    return kw, kw_pos, len(kw), pos, target
-
-## sample positive keyword from asr label
-#def sample_kw_from_label(label: List, segment: List, kw_candidate: List=None, min_keyword_len: int=2, max_keyword_len: int=6)->Tuple[List, int]:
-#    match_len = 0
-#    while match_len == 0:
-#        seg_len = len(segment)
-#        seg_pos = random.randint(0, seg_len-1)
-#        kw = segment[seg_pos]
-#        kw_len = len(kw)
-#        if kw_len >= min_keyword_len and kw_len <= max_keyword_len:
-#            match_len = 1
-#        kw_pos = 0
-#        for i in range(seg_pos):
-#            kw_pos += len(segment[i])
-#    return (kw, kw_pos)
-
-## sample negative keyword from the whole corpus
-#def random_one_neg(neg_list: List[int], neg_len: int, pos_label: List, spk_id: str=None)->List[int]:
-#    neg = pos_label[0]
-#    flatten_label = unfold_list(pos_label)
-#    flatten_neg = unfold_list(neg)
-#    flatten_label = int2sym(flatten_label)
-#    flatten_neg = int2sym(flatten_neg)
-#    if spk_id != None:
-#        neg_spk = spk_id
-#    else:
-#        neg_spk = -1
-#    while (" ".join(flatten_neg) in " ".join(flatten_label)) or (neg_spk == spk_id):
-#        one_neg_list = neg_list[random.randint(0, neg_len-1)]
-#        one_neg_list = json.loads(one_neg_list)
-#        if spk_id != None:
-#            neg_spk = one_neg_list['key'].split('-')[0]
-#        one_neg_label = one_neg_list['phn_label']
-#        kw_candidate = one_neg_list.get('kw_candidate', None) 
-#        neg, _ = sample_kw_from_label(one_neg_label, kw_candidate)
-#        flatten_neg = unfold_list(neg)
-#        flatten_neg = int2sym(flatten_neg)
-#    return neg
-
-#def random_one_neg_from_lexicon(aux_lexicon: Dict, min_keyword_len: int, max_keyword_len: int, num_pre_sample: int, pos_label: List)->List[int]:
-#    neg = pos_label[0]
-#    lexicon_by_len = aux_lexicon['by_len']
-#    flatten_label = unfold_list(pos_label)
-#    flatten_neg = unfold_list(neg)
-#    flatten_label = int2sym(flatten_label)
-#    flatten_neg = int2sym(flatten_neg)
-#    pre_sample_lexicon = {}
-#    neg_keyword_len = random.randint(min_keyword_len, max_keyword_len)
-#    pre_sample_lexicon = random.sample(lexicon_by_len[str(neg_keyword_len)], num_pre_sample)
-#    while (" ".join(flatten_neg) in " ".join(flatten_label)):
-#        neg = random.choice(pre_sample_lexicon)
-#        flatten_neg = unfold_list(neg)
-#        flatten_neg = int2sym(flatten_neg)
-#    return neg

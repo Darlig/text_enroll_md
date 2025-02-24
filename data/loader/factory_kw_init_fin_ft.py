@@ -127,6 +127,13 @@ def process_corruption(data: Iterator, config: Dict[Any, Any]) -> Iterator[Dict[
                 corrupt_list, corrupt_list_len, config['self_corruption'], 'self', 
             )
             num_corrupt += n_scorrupt
+
+            sample.update({
+                'self_crpt_ratios': s_ratios,
+                'self_crpt_material': s_corruption_material,
+                'n_scorrupt': n_scorrupt,
+                'n_max_scorrupt': max_scorrupt
+            })
         
         if config.get('none_target_corruption', False): # make none target corruption materials
             assert 'none_target_corruption' in sample
@@ -137,19 +144,16 @@ def process_corruption(data: Iterator, config: Dict[Any, Any]) -> Iterator[Dict[
             )
             num_corrupt += n_ncorrupt
 
-        # save the metarial into sample dict
+            sample.update({
+                'noise_crpt_ratios': n_ratios,
+                'noise_crpt_material': n_corruption_material,
+                'n_ncorrupt': n_ncorrupt
+            })
+
         sample.update({
-#            'self_crpt_ratios': s_ratios,
-            'noise_crpt_ratios': n_ratios,
-#            'self_crpt_material': s_corruption_material,
-            'noise_crpt_material': n_corruption_material,
-#            'n_scorrupt': n_scorrupt, # number of utterences in overlap speech; 
-#                                      # mixture = speech_1 + speech_2 ... speech_n_scorrupt
-            'n_ncorrupt': n_ncorrupt, # number of noise data to performe noise 
-                                      # augmentation noisy = mixture/speech + noise_1 + noise_2 .. noise_n
-#            'n_max_scorrupt': max_scorrupt,
-            'num_corrupt': num_corrupt,
+            'num_corrupt': num_corrupt
         })
+
         yield sample
 
 # process speech feats

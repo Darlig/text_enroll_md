@@ -228,7 +228,7 @@ class Trainer():
         start_epoch = self.data_config.get('start_epoch', 0)
         tensorboard_dir = 'tensorboard/{}'.format(self.exp_config['exp_dir'])
         if start_epoch != 0:
-            ckpt = self.exp_config['trained_ckpt']
+            ckpt = "{}/kwatt_asr_{}.pt".format(self.exp_config['exp_dir'], start_epoch - 1)
             self.global_step = self.load_ckpt(ckpt)
             if self.rank == 0:
                 self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train', purge_step=self.global_step)
@@ -238,8 +238,6 @@ class Trainer():
             if self.rank == 0:
                 self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train')
                 self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv')
-        #self.scheduler = WarmUpLR(self.optim, warmup_steps=warm_up_peak_step)
-        #self.scheduler.set_step(self.global_step)
         if self.exp_config.get('finetune', False):
             finetune_config = self.exp_config.get('finetune')
             #trained_ckpt = finetune_config['trained_ckpt']
@@ -301,13 +299,6 @@ class Trainer():
         opt = ckpt_dict['opt']
         step = ckpt_dict['step']
 
-        self.optim.load_state_dict(opt)
-        for state in self.optim.state.values():
-            for k, v in state.items():
-                if k == 'step':
-                    continue
-                if isinstance(v, torch.Tensor):
-                    state[k] = v.to(self.device)
         self.model.load_state_dict(model)
         return step
     
@@ -452,7 +443,6 @@ class Trainer():
                             epoch, batch_id
                         )
                     )
-                #self.scheduler.step()
                 self.global_step += 1
                 tr_record_dict['total_loss'] = loss
                 tr_record_dict.update(detail_loss)

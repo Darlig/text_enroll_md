@@ -103,7 +103,8 @@ class Trainer():
         elif self.exp_config['trained_ckpt']:
             trained_ckpt_dir = os.path.dirname(self.exp_config['trained_ckpt'])
             config_file = '{}/model.yaml'.format(trained_ckpt_dir)
-            shutil.copy(config_file, self.exp_config['exp_dir'])
+            if self.rank == 0:
+                shutil.copy(config_file, self.exp_config['exp_dir'])
             model_config = yaml.load(open(config_file), Loader=yaml.FullLoader)
             self.model_config = model_config
         else:
@@ -237,8 +238,8 @@ class Trainer():
             if self.rank == 0:
                 self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train')
                 self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv')
-        self.scheduler = WarmUpLR(self.optim, warmup_steps=warm_up_peak_step)
-        self.scheduler.set_step(self.global_step)
+        #self.scheduler = WarmUpLR(self.optim, warmup_steps=warm_up_peak_step)
+        #self.scheduler.set_step(self.global_step)
         if self.exp_config.get('finetune', False):
             finetune_config = self.exp_config.get('finetune')
             #trained_ckpt = finetune_config['trained_ckpt']
@@ -451,7 +452,7 @@ class Trainer():
                             epoch, batch_id
                         )
                     )
-                self.scheduler.step()
+                #self.scheduler.step()
                 self.global_step += 1
                 tr_record_dict['total_loss'] = loss
                 tr_record_dict.update(detail_loss)

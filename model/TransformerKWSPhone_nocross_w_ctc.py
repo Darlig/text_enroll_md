@@ -103,6 +103,8 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
         au_kw_feed_forward_config = au_kw_transformer_config['feed_forward_config']
         au_kw_hidden_dim = au_kw_transformer_config['size']
 
+        self.l1, self.l2 = loss_weight
+
         # audio net
         self.au_conv = nn.Sequential(
             torch.nn.Conv2d(1, au_hidden_dim, 3, 2),
@@ -125,20 +127,12 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
             ) for _ in range(num_audio_self_block)
         ])
 
-        self.au_kw_transformer = nn.ModuleList([
-            NM.TransformerLayer(
-                size=au_kw_hidden_dim,
-                self_att=au_kw_self_att(**au_kw_self_att_cofing),
-                feed_forward=NM.FNNBlock(**au_kw_feed_forward_config),
-            ) for _ in range(num_au_kw_concat_block)
-        ])
-
         # kw net
         self.phn_emb = NM.WordEmbedding(
             num_tokens=num_phn_token, dim=kw_transformer_config['size']
         )
-        self.kw_pos_emb = NM.PositionalEncoding(kw_hidden_dim)
         self.kw_trans = NM.FNNBlock(**kw_input_trans_config)
+        self.kw_pos_emb = NM.PositionalEncoding(kw_hidden_dim)
         self.kw_transformer = nn.ModuleList([
             NM.TransformerLayer(
                 size=kw_hidden_dim,
@@ -151,22 +145,30 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
         else:
             self.kw_au_link = nn.Identity()
 
-        self.det_net = nn.Sequential(
-            NM.FNNBlock(**au_feed_forward_config), nn.Linear(au_hidden_dim, 1), nn.Sigmoid()
-        )
-
         # au kw concat net
         self.au_kw_pos_emb = NM.PositionalEncoding(au_kw_hidden_dim)
 
+        self.au_kw_transformer = nn.ModuleList([
+            NM.TransformerLayer(
+                size=au_kw_hidden_dim,
+                self_att=au_kw_self_att(**au_kw_self_att_cofing),
+                feed_forward=NM.FNNBlock(**au_kw_feed_forward_config),
+            ) for _ in range(num_au_kw_concat_block)
+        ])
+
         # decoder net
-        
         phn_ctc_conf = {
             'num_tokens': num_phn_token,
             'front_output_size': au_hidden_dim 
         }
-        self.l1, self.l2 = loss_weight
-        self.det_crit = nn.BCELoss(reduction='mean')
         self.phn_asr_crit = NM.CTC(**phn_ctc_conf)
+
+        # detection net
+        self.det_net = nn.Sequential(
+            NM.FNNBlock(**au_feed_forward_config), nn.Linear(au_hidden_dim, 1), nn.Sigmoid()
+        )
+        self.det_crit = nn.BCELoss(reduction='mean')
+
 
     def forward_transformer(
         self,

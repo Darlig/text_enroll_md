@@ -228,13 +228,13 @@ class Trainer():
         start_epoch = self.data_config.get('start_epoch', 0)
         tensorboard_dir = 'tensorboard/{}'.format(self.exp_config['exp_dir'])
         if start_epoch != 0:
-            ckpt = "{}/kwatt_asr_{}.pt".format(self.exp_config['exp_dir'], start_epoch - 1)
+            ckpt = self.load_endpoint(start_epoch-1)
             self.global_step = self.load_ckpt(ckpt)
             if self.rank == 0:
                 self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train', purge_step=self.global_step)
                 self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv', purge_step=start_epoch)
         else:
-            self.global_step = 0
+            self.global_step = self.load_ckpt(self.exp_config['trained_ckpt'])
             if self.rank == 0:
                 self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train')
                 self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv')
@@ -299,6 +299,15 @@ class Trainer():
         opt = ckpt_dict['opt']
         step = ckpt_dict['step']
 
+        self.optim.load_state_dict(opt)
+        for param_group in self.optim.param_groups:
+            param_group['lr'] = self.exp_config['optim_config']['lr']
+        for state in self.optim.state.values():
+            for k, v in state.items():
+                if k == 'step':
+                    continue
+                if isinstance(v, torch.Tensor):
+                    state[k] = v.to(self.device)
         self.model.load_state_dict(model)
         return step
     

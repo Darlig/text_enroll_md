@@ -298,6 +298,7 @@ class Trainer():
         model = ckpt_dict['model']
         opt = ckpt_dict['opt']
         step = ckpt_dict['step']
+        opt['param_groups'][0]['params'] = list(self.model.parameters())
 
         self.optim.load_state_dict(opt)
         for param_group in self.optim.param_groups:

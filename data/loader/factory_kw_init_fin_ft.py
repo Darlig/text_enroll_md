@@ -426,8 +426,8 @@ def process_sampled_keyword_from_label(
     for sample in data:
         new_phn_label = copy.deepcopy(sample['phn_label'])
         #new_segment_label = copy.deepcopy(sample['segment_label'])
-        new_bpe_label = copy.deepcopy(sample['bpe_label'])
-        bpe_candidate = copy.deepcopy(sample['b_kw_candidate'])
+        new_bpe_label = copy.deepcopy(sample['bpe_label']) if 'bpe_label' in sample else None
+        bpe_candidate = copy.deepcopy(sample['b_kw_candidate']) if 'b_kw_candidate' in sample else None
         #num_pre_sample = 5
         finetune_data = copy.deepcopy(sample['finetune_data'])
         kw_lexicon = copy.deepcopy(sample['kw_lexicon'])

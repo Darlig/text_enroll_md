@@ -373,7 +373,7 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
 
 
     @torch.no_grad()
-    def evaluate_sph_emb(self, input_data):
+    def evaluate_sph_emb(self, input_data, return_hyp=False):
         sph_input, sph_len = input_data
         b,t,d = sph_input.size()
         sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
@@ -390,8 +390,12 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
         sph_emb = self.au_pos_emb(sph_emb)
 
         sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
+        phn_asr_hyp = self.phn_asr_crit.get_hyp(sph_emb)
 
-        return sph_emb, sph_mask
+        if return_hyp:
+            return sph_emb, sph_mask, phn_asr_hyp
+        else:
+            return sph_emb, sph_mask
     
     @torch.no_grad()
     def evaluate_kw_emb(self, input_data):

@@ -10,6 +10,7 @@ from model import TransformerKWSPhone_eval_steps
 from model import TransformerKWSPhone_nocross
 from model import TransformerKWSPhone_nocross_w_ctc
 from model import TransformerKWSPhone_nocross_w_ctc_kw_adapter
+from model import TransformerKWSPhone_nocross_w_ctc_kw_adapter_nonlinear
 
 m_dict = {
     'AEDKWSASR': AEDKWSASR.AEDKWSASR,
@@ -21,5 +22,6 @@ m_dict = {
     'TransformerKWSPhone_eval_steps': TransformerKWSPhone_eval_steps.TransformerKWSPhone_eval_steps,
     'TransformerKWSPhone_nocross': TransformerKWSPhone_nocross.TransformerKWSPhone_nocross,
     'TransformerKWSPhone_nocross_w_ctc': TransformerKWSPhone_nocross_w_ctc.TransformerKWSPhone_nocross_w_ctc,
-    'TransformerKWSPhone_nocross_w_ctc_kw_adapter': TransformerKWSPhone_nocross_w_ctc_kw_adapter.TransformerKWSPhone_nocross_w_ctc_kw_adapter
+    'TransformerKWSPhone_nocross_w_ctc_kw_adapter': TransformerKWSPhone_nocross_w_ctc_kw_adapter.TransformerKWSPhone_nocross_w_ctc_kw_adapter,
+    'TransformerKWSPhone_nocross_w_ctc_kw_adapter_nonlinear': TransformerKWSPhone_nocross_w_ctc_kw_adapter_nonlinear.TransformerKWSPhone_nocross_w_ctc_kw_adapter_nonlinear
 }

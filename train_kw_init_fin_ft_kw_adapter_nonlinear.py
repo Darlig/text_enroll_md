@@ -445,7 +445,7 @@ class Trainer():
                 self.recorder.info("kw_transformer.3.self_att.q.weight: {}".format(
                     self.model.get_parameter('kw_transformer.3.self_att.q.weight')
                 ))
-                self.recorder.info("kw_adapter_trans.weight: {}".format(
+                self.recorder.info("kw_adapter_trans.w1.weight: {}".format(
                     self.model.get_parameter('kw_adapter_trans.w1.weight')
                 ))
             

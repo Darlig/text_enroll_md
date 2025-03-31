@@ -220,13 +220,15 @@ class Trainer():
         start_epoch = self.data_config.get('start_epoch', 0)
         tensorboard_dir = 'tensorboard/{}'.format(self.exp_config['exp_dir'])
         if start_epoch != 0:
-            ckpt = "{}/kwatt_asr_{}.pt".format(self.exp_config['exp_dir'], start_epoch - 1)
+            ckpt = self.load_endpoint(start_epoch-1)
             self.global_step = self.load_ckpt(ckpt)
             if self.rank == 0:
                 self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train', purge_step=self.global_step)
                 self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv', purge_step=start_epoch)
         else:
-            self.global_step = self.load_ckpt_adapter(self.exp_config['trained_ckpt'])
+            self.load_ckpt_adapter(self.exp_config['trained_ckpt'])
+            #self.global_step = self.load_ckpt_adapter(self.exp_config['trained_ckpt'])
+            self.global_step = 0
             if self.rank == 0:
                 self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train')
                 self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv')
@@ -242,6 +244,8 @@ class Trainer():
                 world_size=self.world_size,
                 rank=self.rank
             )
+            for name, param in self.model.named_parameters():
+                print(name)
             self.model.cuda()
             self.model = torch.nn.parallel.DistributedDataParallel(
                 self.model
@@ -305,6 +309,8 @@ class Trainer():
             self.recorder.info("Missing keys: {}".format(incompatibale_keys.missing_keys))
         if incompatibale_keys.unexpected_keys:
             self.recorder.info("Unexpected keys: {}".format(incompatibale_keys.unexpected_keys))
+        torch.nn.init.eye_(self.model.kw_adapter_trans.weight)
+        torch.nn.init.zeros_(self.model.kw_adapter_trans.bias)
 
         for name, param in self.model.named_parameters():
             if name not in incompatibale_keys.missing_keys:
@@ -433,12 +439,12 @@ class Trainer():
             torch.cuda.empty_cache()
             self.epoch = epoch
             self.tr_set.set_epoch(epoch)
-            if epoch % 5 == 0:
+            if self.rank == 0 and epoch % 5 == 0:
                 self.recorder.info("kw_transformer.3.self_att.q.weight: {}".format(
-                    self.model.get_parameter('kw_transformer.3.self_att.q.weight')
+                    self.model.module.get_parameter('kw_transformer.3.self_att.q.weight')
                 ))
                 self.recorder.info("kw_adapter_trans.weight: {}".format(
-                    self.model.get_parameter('kw_adapter_trans.weight')
+                    self.model.module.get_parameter('kw_adapter_trans.weight')
                 ))
             
             for batch_id, data in enumerate(self.tr_loader):

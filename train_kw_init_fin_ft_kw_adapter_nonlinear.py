@@ -309,8 +309,10 @@ class Trainer():
             self.recorder.info("Missing keys: {}".format(incompatibale_keys.missing_keys))
         if incompatibale_keys.unexpected_keys:
             self.recorder.info("Unexpected keys: {}".format(incompatibale_keys.unexpected_keys))
-        torch.nn.init.eye_(self.model.kw_adapter_trans.weight)
-        torch.nn.init.zeros_(self.model.kw_adapter_trans.bias)
+        torch.nn.init.eye_(self.model.kw_adapter_trans.w1.weight)
+        torch.nn.init.zeros_(self.model.kw_adapter_trans.w1.bias)
+        torch.nn.init.eye_(self.model.kw_adapter_trans.w2.weight)
+        torch.nn.init.zeros_(self.model.kw_adapter_trans.w2.bias)
 
         for name, param in self.model.named_parameters():
             if name not in incompatibale_keys.missing_keys:
@@ -444,7 +446,7 @@ class Trainer():
                     self.model.get_parameter('kw_transformer.3.self_att.q.weight')
                 ))
                 self.recorder.info("kw_adapter_trans.weight: {}".format(
-                    self.model.get_parameter('kw_adapter_trans.weight')
+                    self.model.get_parameter('kw_adapter_trans.w1.weight')
                 ))
             
             for batch_id, data in enumerate(self.tr_loader):

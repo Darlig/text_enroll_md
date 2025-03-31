@@ -442,13 +442,21 @@ class Trainer():
             self.epoch = epoch
             self.tr_set.set_epoch(epoch)
             if self.rank == 0 and epoch % 5 == 0:
-                self.recorder.info("kw_transformer.3.self_att.q.weight: {}".format(
-                    self.model.get_parameter('kw_transformer.3.self_att.q.weight')
-                ))
-                self.recorder.info("kw_adapter_trans.w1.weight: {}".format(
-                    self.model.get_parameter('kw_adapter_trans.w1.weight')
-                ))
-            
+                if self.world_size > 1:
+                    self.recorder.info("kw_transformer.3.self_att.q.weight: {}".format(
+                        self.model.module.get_parameter('kw_transformer.3.self_att.q.weight')
+                    ))
+                    self.recorder.info("kw_adapter_trans.w1.weight: {}".format(
+                        self.model.module.get_parameter('kw_adapter_trans.w1.weight')
+                    ))
+                else:
+                    self.recorder.info("kw_transformer.3.self_att.q.weight: {}".format(
+                        self.model.get_parameter('kw_transformer.3.self_att.q.weight')
+                    ))
+                    self.recorder.info("kw_adapter_trans.w1.weight: {}".format(
+                        self.model.get_parameter('kw_adapter_trans.w1.weight')
+                    ))
+
             for batch_id, data in enumerate(self.tr_loader):
                 torch.cuda.empty_cache()
                 clr = self.optim.param_groups[0]['lr']

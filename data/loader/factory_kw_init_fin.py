@@ -188,7 +188,10 @@ def process_speech_feats(data: Iterator[Dict], config: Dict[Any, Any]) -> Iterat
             rirs_config = config.get('rirs')
             assert ('rirs' in sample)
             rirs_src = sample['rirs']
-            speech_feats = [utils.reverb_aug(f, rirs_config, rirs_src) for f in speech_feats] 
+            speech_feats = [
+                aug for f in speech_feats
+                if (aug := utils.reverb_aug(f, rirs_config, rirs_src)) is not None
+            ]
 
         if sample.get('num_corrupt', 0) > 0:
             mix_config = sample.get('mix_config', {})

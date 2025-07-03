@@ -327,7 +327,10 @@ def reverb_aug(waveform: torch.Tensor, config: Dict, rirs: str=None) -> torch.Te
         n = waveform.size(0)
     else:
         n = waveform.dim()
-    assert(n == 1)
+    try:
+        assert n == 1, "number of waveform channel must be 1"
+    except AssertionError as e:
+        print(f"Assertion failed: {e}")
     if rirs:
         rirs_prob = config.get('rirs_prob', 0.4)
         if random.uniform(0,1) < rirs_prob:

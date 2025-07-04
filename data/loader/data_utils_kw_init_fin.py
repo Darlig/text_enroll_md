@@ -331,6 +331,13 @@ def reverb_aug(waveform: torch.Tensor, config: Dict, rirs: str=None) -> torch.Te
         assert n == 1, "number of waveform channel must be 1"
     except AssertionError as e:
         print(f"Assertion failed: {e}")
+        return None
+    try:
+        assert waveform.shape[1] >= 16000, "waveform length must be larger than 16000 samples"
+    except AssertionError as e:
+        print(f"Assertion failed: {e}")
+        print("waveform length: {}".format(waveform.shape[1]))
+        return None
     if rirs:
         rirs_prob = config.get('rirs_prob', 0.4)
         if random.uniform(0,1) < rirs_prob:
@@ -376,8 +383,17 @@ def make_mix_wav(
             speech[delay_idx] = torch.cat([zero_padding, speech[delay_idx]], dim=1)
 
     max_len = max([s.size(1) for s in speech])
-    speech = [padding_wav(s, max_len, 'zero') for s in speech] # padding_wav(target_wav, padding_len, padding_type)
-    noise = [padding_wav(n, max_len, 'repeat') for n in noise]
+    
+    # speech = [padding_wav(s, max_len, 'zero') for s in speech] # padding_wav(target_wav, padding_len, padding_type)
+    # noise = [padding_wav(n, max_len, 'repeat') for n in noise]
+    speech = [
+        pad for s in speech
+        if (pad := padding_wav(s, max_len, 'zero')) is not None
+    ]
+    noise = [
+        pad for n in noise
+        if (pad := padding_wav(n, max_len, 'repeat')) is not None
+    ]
 
     rms = [math.sqrt((s**2).mean()) for s in speech]
     rms = list(map(lambda x: x if x > 0.0001 else 1, rms)) # avoid devide very small value 0
@@ -403,8 +419,17 @@ def make_mix_wav(
 def padding_wav(waveform: torch.Tensor, length: int, padding_type: str='zero')->torch.Tensor:
     assert (padding_type in ['zero', 'repeat'])
     assert (waveform.dim() == 2)
-    assert (waveform.size(0) == 1)
-    wav_len = waveform.size(1)
+    try:
+        assert waveform.size(0) == 1, "padding_wav() -> number of waveform channel must be 1"
+    except AssertionError as e:
+        print(f"Assertion failed: {e}")
+        return None
+    # try:
+    #     assert waveform.shape[1] >= 16000, "padding_wav() -> waveform length must be larger than 16000 samples"
+    # except AssertionError as e:
+    #     print(f"Assertion failed: {e}")
+    #     return None
+    wav_len = waveform.shape[1]
     if padding_type == 'repeat':
         if wav_len < length:
             repeat_time = length // wav_len + 1

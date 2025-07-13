@@ -78,6 +78,7 @@ TRANSFORM_FACTOR ={
 # But egs_format didn't boost the training speed yet. just keep it and waiting for tuning
 def process_raw(data: Iterator) -> Iterator[Dict[Any, Any]]:
     for sample in data:
+        # print("process_raw() -> sample keys: {}".format(sample.keys()))
         one_sample = json.loads(sample['src'])
         if 'self_corruption' in sample:
             self_corruption = sample['self_corruption']
@@ -107,6 +108,7 @@ def process_raw(data: Iterator) -> Iterator[Dict[Any, Any]]:
 # the real mix waveform!!!!
 def process_corruption(data: Iterator, config: Dict[Any, Any]) -> Iterator[Dict[Any, Any]]:
     for sample in data:
+        # print("process_corruption() -> sample keys: {}".format(sample.keys()))
         s_ratios = n_ratios = list()
         s_corruption_material = n_corruption_material = dict()
         num_corrupt = n_scorrupt = n_ncorrupt = 0
@@ -118,6 +120,13 @@ def process_corruption(data: Iterator, config: Dict[Any, Any]) -> Iterator[Dict[
                 corrupt_list, corrupt_list_len, config['self_corruption'], 'self', 
             )
             num_corrupt += n_scorrupt
+            sample.update({
+                'self_crpt_ratios': s_ratios,
+                'self_crpt_material': s_corruption_material,
+                'n_scorrupt': n_scorrupt, # number of utterences in overlap speech; 
+                                        # mixture = speech_1 + speech_2 ... speech_n_scorrupt
+                'n_max_scorrupt': max_scorrupt,
+            })
         
         if config.get('none_target_corruption', False): # make none target corruption materials
             assert 'none_target_corruption' in sample
@@ -127,19 +136,16 @@ def process_corruption(data: Iterator, config: Dict[Any, Any]) -> Iterator[Dict[
                 corrupt_list, corrupt_list_len, config['none_target_corruption'], 'noise'
             )
             num_corrupt += n_ncorrupt
+            sample.update({
+                'noise_crpt_ratios': n_ratios,
+                'noise_crpt_material': n_corruption_material,
+                'n_ncorrupt': n_ncorrupt, # number of noise data to performe noise 
+                                        # augmentation noisy = mixture/speech + noise_1 + noise_2 .. noise_n
+            })
 
         # save the metarial into sample dict
         sample.update({
-            'self_crpt_ratios': s_ratios,
-            'noise_crpt_ratios': n_ratios,
-            'self_crpt_material': s_corruption_material,
-            'noise_crpt_material': n_corruption_material,
-            'n_scorrupt': n_scorrupt, # number of utterences in overlap speech; 
-                                      # mixture = speech_1 + speech_2 ... speech_n_scorrupt
-            'n_ncorrupt': n_ncorrupt, # number of noise data to performe noise 
-                                      # augmentation noisy = mixture/speech + noise_1 + noise_2 .. noise_n
-            'n_max_scorrupt': max_scorrupt,
-            'num_corrupt': num_corrupt,
+            'num_corrupt': num_corrupt
         })
         yield sample
 
@@ -152,6 +158,7 @@ def process_speech_feats(data: Iterator[Dict], config: Dict[Any, Any]) -> Iterat
         input_data_type = config.get('data_type', 'raw') # feats type: raw=>waveform kaidl: kaldi ark, pt: torch.pt
         if (input_data_type != 'raw') and ('corruption_material' in sample): # corruption only support performed on waveform
             raise NotImplementedError("Only support corruption on waveforme")
+        # print("sample keys: {}".format(sample.keys()))
         speech_feats = [sample['sph']]
 
         if 'self_crpt_material' in sample:
@@ -195,6 +202,7 @@ def process_speech_feats(data: Iterator[Dict], config: Dict[Any, Any]) -> Iterat
 
         if sample.get('num_corrupt', 0) > 0:
             mix_config = sample.get('mix_config', {})
+            # print("speech_feats len: {}".format(len(speech_feats)))
             feats = utils.make_mix_wav(speech_feats, self_crpt_ratios, noise_feats, noise_crpt_ratios, **mix_config)
         else:
             feats = speech_feats
@@ -426,6 +434,35 @@ def process_sampled_keyword_from_label(
             corrupt_label=corrupt_label, min_keyword_len=min_keyword_len, max_keyword_len=max_keyword_len, aux_lexicon=aux_lexicon
         )
         kw, new_phn_label, new_bpe_label, kw_pos = utils.inject_special_token(
+            keyword=kw, keyword_length=kw_length, positive=pos, label=new_phn_label, 
+            keyword_pos=kw_pos, special_token=special_token,  bpe_label=new_bpe_label, bpe_candidate=bpe_candidate
+        )
+
+        sample.update({'keyword': kw, 'phn_label': new_phn_label, 'bpe_label': new_bpe_label, 'target': target}) 
+        yield sample
+
+
+# Process: sample keyword from continues label
+def process_sampled_keyword_from_label_md(
+        data: Iterator[Dict], positive_prob: float=0.5, neg_len: int = None, special_token: Dict = {}, aux_lexicon: Dict = {}, min_keyword_len: int=2, max_keyword_len: int=6
+):
+    # TEXT_SPEC_TOKEN = {'sos','eos','sok', 'eok', 'unk'}
+    # sos: start of setence, eos: end of setence, sok: start of keyword, eok, end of keyword, unk: unknow token
+    TEXT_SPEC_TOKEN.update(special_token)
+    for sample in data:
+        new_phn_label = copy.deepcopy(sample['phn_label'])
+        new_segment_label = copy.deepcopy(sample['segment_label'])
+        new_bpe_label = copy.deepcopy(sample['bpe_label'])
+        bpe_candidate = copy.deepcopy(sample['b_kw_candidate'])
+        num_pre_sample = 5
+        corrupt_label = None if 'mix_phn_label' not in sample else sample['mix_phn_label']
+        kw, kw_pos, kw_length, pos, target = utils.make_keyword_md(
+            candidate_seq=new_phn_label, segment_seq=new_segment_label,
+            positive_prob=positive_prob, num_pre_sample=num_pre_sample, kw_position_candidate=sample['kw_candidate'],
+            corrupt_label=corrupt_label, min_keyword_len=min_keyword_len, max_keyword_len=max_keyword_len, aux_lexicon=aux_lexicon,
+            sample_func="sample_kw_from_label", max_sub_ratio=0.5
+        )
+        kw, new_phn_label, new_bpe_label, kw_pos = utils.inject_special_token_md(
             keyword=kw, keyword_length=kw_length, positive=pos, label=new_phn_label, 
             keyword_pos=kw_pos, special_token=special_token,  bpe_label=new_bpe_label, bpe_candidate=bpe_candidate
         )

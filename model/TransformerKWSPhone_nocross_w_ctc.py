@@ -307,8 +307,8 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
             sph_kw_emb, _ = tf_layer(sph_kw_emb, sph_kw_mask, cross_input=None)
 
             # detection loss
-            det_result_layer = self.det_net(sph_kw_emb[:,0,:])
-            det_loss_layer = self.det_crit(det_result_layer, target.to(torch.float32))
+            det_result_layer = self.det_net(sph_kw_emb[:,0:kw_emb.size(1):2,:])
+            det_loss_layer = self.det_crit(det_result_layer[:,:,0], target.to(torch.float32))
             det_loss += det_loss_layer / len(self.au_kw_transformer)
             detail_loss['det_loss_layer_{}'.format(i)] = det_loss_layer.clone().detach()
         

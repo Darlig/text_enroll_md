@@ -155,6 +155,8 @@ class DataList(IterableDataset):
         # prepare mate data: pack self-crroupt data, noise data, and augmentation data into "data"
         for i, index in enumerate(indexes):
             data = dict(src=self.lists[index], epoch=self.sampler.epoch)
+            # print("DataList() -> data keys: {}".format(data.keys()))
+            # print("DataList() -> data['src']: {}".format(data['src']))
             data.update(sampler_info)
             if self.self_corruption:
                 self_corrupt_candidate = self.make_corrupt_candidate(
@@ -244,7 +246,7 @@ def Dataset(conf: Dict,  d_list: List) -> Tuple[Any, ...]:
             random.shuffle(crpt_list)
             keyword_config.update({'neg_len': 70})
             keyword_config.update({'aux_lexicon': aux_lexicon})
-            dataset = Processer(dataset, factory.process_sampled_keyword_from_label,  **keyword_config)
+            dataset = Processer(dataset, factory.process_sampled_keyword_from_label_md,  **keyword_config)
         elif keyword_format == 'fix':
             dataset = Processer(dataset, factory.process_fix_keyword, **keyword_config)
         elif keyword_format == 'test':

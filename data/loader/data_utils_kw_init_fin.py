@@ -121,6 +121,37 @@ def substitution_neg(positive_keyword: List[int], aux_lexicon: Dict, negative_ke
     #print("sub neg positive_keyword: {}, sample_neg: {}".format(positive_keyword, keyword))
     return keyword
 
+def substitution_neg_md(positive_keyword: List[int], aux_lexicon: Dict, max_sub_ratio: float=0.5, min_sub: int=1) -> List[int]:
+    char_phones = aux_lexicon.get('by_len')['1']
+
+    len_positive_phones = len(positive_keyword)
+    max_sub = int(max_sub_ratio * len_positive_phones)
+    try:
+        assert max_sub >= min_sub, "max_sub must be not less than min_sub"
+    except AssertionError as e:
+        print(f"Assertion failed: {e}, max_sub: {max_sub}, min_sub: {min_sub}")
+        return positive_keyword, torch.tensor([1]*len(positive_keyword))
+    n_sub = random.randint(min_sub, max_sub)
+    sub_idx = random.sample(range(len_positive_phones), k=n_sub)
+
+    keyword = []
+    target = []
+    for x, one_phone in enumerate(positive_keyword):
+
+        if x not in sub_idx:
+            # keyword.extend(unfold_list(one_word))
+            keyword.append(one_phone)
+            target.append(1)
+        else:
+            sub_char = random.choice(char_phones)
+            sub_phone = random.choice(sub_char[0])
+            keyword.append(sub_phone)
+            target.append(0)
+    target = torch.tensor(target)
+    # print("substitution_neg_md() -> keyword: {}".format(keyword))
+    # print("substitution_neg_md() -> target: {}".format(target))
+    return keyword, target
+
 def deletion_neg(positive_keyword: List[int], aux_lexicon: Dict, negative_keyword: List[int]) -> List[int]:
     #print("deletion_neg")
     if len(positive_keyword) < 3:
@@ -399,7 +430,10 @@ def make_mix_wav(
     rms = list(map(lambda x: x if x > 0.0001 else 1, rms)) # avoid devide very small value 0
     max_rms = max(rms)
 
+    # print("speech length: {}".format(len(speech)))
     scaled_wav = [speech[i]*(max_rms/rms[i]) for i in range(len(speech))]
+    # print("scaled_wav length: {}".format(len(scaled_wav)))
+    # print("ratios length: {}".format(len(ratios)))
     scaled_wav = [scaled_wav[i]*ratios[i] for i in range(len(scaled_wav))]
 
     mix_wav = sum(scaled_wav)
@@ -644,11 +678,85 @@ def inject_special_token(
 
     return (new_keyword, new_phn_label, new_bpe_label, keyword_pos)
 
+# insert special token in label sequence such as SOS: 0(start of sentence) 
+# 1 2 3 4 5 -> "0" 1 2 3 4 5
+def inject_special_token_md(
+        keyword: List[int], keyword_length: int, label: List=None, 
+        positive: bool=True, keyword_pos: int=None, special_token: Dict={}, bpe_label: List=None, 
+        bpe_candidate: List=None
+    )->Tuple[List, List, List, int]:
+    TEXT_SPEC_TOKEN.update(special_token)
+    new_phn_label = copy.deepcopy(label)
+    new_bpe_label = copy.deepcopy(bpe_label) if bpe_label else [0]
+    new_keyword = copy.deepcopy(keyword)
+    # if (not positive) and (TEXT_SPEC_TOKEN['punk'] != None):
+    #     new_phn_label = torch.tensor([TEXT_SPEC_TOKEN['punk'] for x in range(len(new_phn_label)//3)])
+    #     if bpe_label:
+    #         new_bpe_label = torch.tensor([TEXT_SPEC_TOKEN['unk']  for x in range(len(new_bpe_label)//3)])
+
+    if TEXT_SPEC_TOKEN['sos'] != None: # start of sentence
+        new_phn_label = [TEXT_SPEC_TOKEN['sos']] + new_phn_label
+        keyword_pos = keyword_pos + 1  if keyword_pos != None else keyword_pos # one token insert before the keyword
+        
+    if TEXT_SPEC_TOKEN['eos'] != None: # end of sentence
+        new_phn_label = new_phn_label + [TEXT_SPEC_TOKEN['eos']] 
+    
+    if TEXT_SPEC_TOKEN['sop'] != None: # start of phone
+        for i in range(len(new_keyword)):
+            new_keyword.insert(i*2, [TEXT_SPEC_TOKEN['sop']])
+
+    if TEXT_SPEC_TOKEN['psok'] != None: # start of keyword
+        new_keyword.insert(0, [TEXT_SPEC_TOKEN['psok']])
+
+    if TEXT_SPEC_TOKEN['peok'] != None: # end of keyword
+        new_keyword.insert(len(new_keyword), [TEXT_SPEC_TOKEN['peok']])
+
+    if (TEXT_SPEC_TOKEN['with_trans']) and (positive): # modify keyword in label
+        new_phn_label[keyword_pos: keyword_pos+keyword_length] = new_keyword
+        if bpe_label:
+            bpe_kw_head = bpe_candidate[keyword_pos]
+            bpe_kw_tail = bpe_candidate[keyword_pos + keyword_length - 1] # max index = offset + length - 1
+            bpe_kw = bpe_label[bpe_kw_head: bpe_kw_tail + 1] # keyword in bpe label
+            bpe_kw.insert(0, [TEXT_SPEC_TOKEN['sok']])
+            bpe_kw.insert(len(bpe_kw), [TEXT_SPEC_TOKEN['eok']])
+            new_bpe_label[bpe_kw_head: bpe_kw_tail + 1] = bpe_kw
+
+    return (new_keyword, new_phn_label, new_bpe_label, keyword_pos)
+
 # snipe_edges for waveform
 def snipe_edge(waveform: torch.Tensor, hop_length: int=160):
     num_samples = waveform.size(1)
     edges = num_samples % hop_length
     return waveform[:,0:num_samples-edges]
+
+def sample_keyword(candidate_seq: List[Any], segment_seq: List[Any], kw_position_candidate: List=None, min_keyword_len: int=2, max_keyword_len: int=6, sample_func: str='sample_kw_from_label') -> Tuple[List, int]:
+    sample_functions = {
+        'sample_kw_from_label': sample_kw_from_label
+    }
+    if sample_func in sample_functions:
+        return sample_functions[sample_func](candidate_seq, segment_seq, kw_position_candidate, min_keyword_len, max_keyword_len)
+    else:
+        raise NotImplementedError("Invalid sample function: {}".format(sample_func))
+
+def make_keyword_md(
+        candidate_seq: List[Any], segment_seq: List[Any],
+        positive_prob: float, num_pre_sample: Optional[int]=None, kw_position_candidate: List=None,
+        corrupt_label: List=None, min_keyword_len: int=2, max_keyword_len: int=6, aux_lexicon: Dict=None, sample_func: str='sample_kw_from_label', max_sub_ratio: float=0.5
+    ) -> Tuple[List, int, int, bool, List]:
+
+    keyword, keyword_pos = sample_keyword(candidate_seq, segment_seq, kw_position_candidate, min_keyword_len, max_keyword_len, sample_func)
+    keyword_ = keyword[:]
+    keyword = unfold_list(keyword_)
+    pos = True
+    target = torch.tensor([1]*len(keyword))
+
+    dice = random.uniform(0,1)
+    if dice > positive_prob: # negtivae sample
+        keyword, target = substitution_neg_md(keyword, aux_lexicon, max_sub_ratio)
+        keyword_pos = -1
+        pos = False
+    return (keyword, keyword_pos, len(keyword), pos, target)
+
 
 def make_keyword(
         candidate_seq: List[Any], segment_seq: List[Any],

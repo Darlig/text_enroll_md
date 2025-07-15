@@ -125,13 +125,16 @@ def substitution_neg_md(positive_keyword: List[int], aux_lexicon: Dict, max_sub_
     char_phones = aux_lexicon.get('by_len')['1']
 
     len_positive_phones = len(positive_keyword)
-    max_sub = int(max_sub_ratio * len_positive_phones)
-    try:
-        assert max_sub >= min_sub, "max_sub must be not less than min_sub"
-    except AssertionError as e:
-        print(f"Assertion failed: {e}, max_sub: {max_sub}, min_sub: {min_sub}")
-        return positive_keyword, torch.tensor([1]*len(positive_keyword))
-    n_sub = random.randint(min_sub, max_sub)
+    if len_positive_phones == 1:
+        n_sub = 1
+    else:
+        max_sub = int(max_sub_ratio * len_positive_phones)
+        try:
+            assert max_sub >= min_sub, "max_sub must be not less than min_sub"
+        except AssertionError as e:
+            print(f"Assertion failed: {e}, max_sub: {max_sub}, min_sub: {min_sub}, positive_keywords: {positive_keyword}, max_sub_ratio: {max_sub_ratio}")
+            return positive_keyword, torch.tensor([1]*len(positive_keyword))
+        n_sub = random.randint(min_sub, max_sub)
     sub_idx = random.sample(range(len_positive_phones), k=n_sub)
 
     keyword = []

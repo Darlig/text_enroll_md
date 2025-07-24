@@ -361,8 +361,10 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
         for i, tf_layer in enumerate(self.au_kw_transformer):
             sph_kw_emb, _ = tf_layer(sph_kw_emb, sph_kw_mask, cross_input=None)
 
-            det_result = self.det_net(sph_kw_emb[:,0,:])
+            det_result = self.det_net(sph_kw_emb[:,0:kw_emb.size(1):2,:])[:,:,0]
         
+        # print("det_result size: {}".format(det_result.size()))
+        # print("sph_kw_emb size: {}".format(sph_kw_emb.size()))
         sph_emb = sph_kw_emb[:,kw_emb.size(1):,:]
 
         phn_asr_hyp = self.phn_asr_crit.get_hyp(sph_emb)

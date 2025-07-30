@@ -108,14 +108,19 @@ def inference(model, wav_path, phones_int, sop_token):
 
 def test_md(model, wav_scp_path, phone_path, human_label_path, result_label_score_path, sop_token):
     data_list = load_dataset(wav_scp_path, phone_path, human_label_path)
+    print("Loaded {} utterances for testing.".format(len(data_list)))
     with open(result_label_score_path, 'w') as f:
-        for uttid, wav_path, phones_int, phones_accuracy in data_list:
-            det_result, hyp_result = inference(model, wav_path, phones_int, sop_token)
+        for n, (uttid, wav_path, phones_int, phones_accuracy) in enumerate(data_list):
+            if n % 2000 == 0:
+                print("Inferencing {}th utterance: {}".format(n, uttid))
+            try:
+                det_result, hyp_result = inference(model, wav_path, phones_int, sop_token)
+            except Exception as e:
+                print(f"Error processing {uttid}: {e}")
+                continue
             # print("utt: {}, phones: {}, det_result: {}".format(uttid, phones_int, det_result))
             for i in range(len(det_result)):
-                f.write("{}.{}\t{}\t{}\n".format(uttid, i, phones_accuracy[i], det_result[i], phones_int[i]))
-            
-
+                f.write("{}.{}\t{}\t{}\t{}\n".format(uttid, i, phones_accuracy[i], det_result[i], phones_int[i]))
 
 
 def load_dataset(wav_scp_path, phone_path, human_label_path):
@@ -123,12 +128,27 @@ def load_dataset(wav_scp_path, phone_path, human_label_path):
     phone_dict = load_dict_from_file(phone_path)
     human_score_dict = load_human_score_json(human_label_path)
     data_list = []
-    for uttid in wav_dict:
+    for i, uttid in enumerate(wav_dict.keys()):
+        if i % 2000 == 0:
+            print(f"Processing {i}th utterance: {uttid}")
+        if i > 26350:
+            print(f"Processing {i}th utterance: {uttid}")
         assert uttid in human_score_dict, f"Missing human score for {uttid}"
         wav_path = wav_dict[uttid]
         phones = human_score_dict[uttid]['phones']
         phones_accuracy = human_score_dict[uttid]['phones_accuracy']
-        phones_int = [ phone_dict[ph] for ph in phones ]
+        is_valid = True
+        for ph in phones:
+            if ph not in phone_dict:
+                # print(f"Phone {ph} not found in phone dictionary")
+                is_valid = False
+                break
+        if not is_valid:
+            print(f"Skipping {uttid} due to invalid phones")
+            continue
+
+        phones_int = [ phone_dict[ph] for ph in phones if ph != "none" ]
+
         data_list.append([
             uttid, wav_path, phones_int, phones_accuracy
         ])

@@ -11,9 +11,10 @@ from yamlinclude import YamlIncludeConstructor
 from model import m_dict
 from torch.nn.utils.rnn import pad_sequence
 import matplotlib.pyplot as plt
-from sklearn.metrics import roc_curve, auc
+from sklearn.metrics import roc_curve, auc, precision_recall_curve
 from pypinyin import pinyin, Style
 import re
+import numpy as np
 
 FBANK_DEFAULT_SETTING = {
     'num_mel_bins': 40, 'frame_length': 25, 'frame_shift': 10
@@ -107,6 +108,9 @@ def inference(model, wav_path, phones_int, sop_token):
         return det_result, hyp_result
 
 def test_md(model, wav_scp_path, phone_path, human_label_path, result_label_score_path, sop_token):
+    if os.path.exists(result_label_score_path):
+        print("Result file already exists: {}. Skip md test.".format(result_label_score_path))
+        return
     data_list = load_dataset(wav_scp_path, phone_path, human_label_path)
     print("Loaded {} utterances for testing.".format(len(data_list)))
     with open(result_label_score_path, 'w') as f:
@@ -154,6 +158,101 @@ def load_dataset(wav_scp_path, phone_path, human_label_path):
         ])
     return data_list
 
+def plot_roc_curve(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
+    fpr, tpr, thresholds = roc_curve(ref_score, hyp_score)
+    print("fpr tpr thresholds")
+    for i in range(10):
+        print("{} {} {}".format(fpr[i], tpr[i], thresholds[i]))
+
+    roc_auc = auc(fpr, tpr)
+
+    plt.figure()
+    plt.plot(fpr, tpr, color='darkorange', lw=2, marker='o', label='ROC curve (area = %0.5f)' % roc_auc)
+    #plt.plot(fpr, tpr, color='darkorange', lw=2, label='ROC curve (area = %0.2f)' % roc_auc)
+    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('ROC for {}'.format(word_py))
+    plt.legend(loc="lower right")
+    plt_path = os.path.join(test_result_dir, 'unet.transformer_{}_roc.png'.format("{}-{}".format(analysis_id, word_py)))
+    plt.savefig(plt_path, dpi=400)
+    return roc_auc
+
+def plot_pr_curve(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
+    # from sklearn.metrics import precision_recall_curve
+
+    precision, recall, thresholds = precision_recall_curve(ref_score, hyp_score)
+    print("precision recall thresholds")
+    for i in range(10):
+        print("{} {} {}".format(precision[i], recall[i], thresholds[i]))
+
+    plt.figure()
+    plt.plot(recall, precision, color='darkorange', lw=2, marker='o')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title('Precision-Recall curve for {}'.format(word_py))
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt_path = os.path.join(test_result_dir, 'unet.transformer_{}_pr.png'.format("{}-{}".format(analysis_id, word_py)))
+    plt.savefig(plt_path, dpi=400)
+
+# def compute_dcf(y_true, y_scores, cost_miss, cost_fa, prior_target, test_result_dir, analysis_id, word_id, roc_auc, f_out_csv):
+def compute_dcf(y_true, y_scores, cost_miss, cost_fa, prior_target):
+    assert cost_miss > 0 and cost_miss <= 1
+    assert cost_fa > 0 and cost_fa <= 1
+    assert prior_target > 0 and prior_target < 1
+
+    fpr, tpr, thresholds_roc = roc_curve(y_true, y_scores)
+    print("skip first row of roc_curve with threshold inf")
+    fpr, tpr, thresholds_roc = fpr[1:], tpr[1:], thresholds_roc[1:]
+    roc_thresh_dict = {}
+    for i in range(len(fpr)):
+        roc_thresh_dict[thresholds_roc[i]] = (fpr[i], tpr[i])
+
+    # dcf(threshold) = cost_miss * prior_target * p_miss(threshold) + cost_fa * (1 - prior_target) * p_fa(threshold)
+    dcf = np.min(cost_miss * prior_target * (1 - tpr) + cost_fa * (1 - prior_target) * fpr)
+    dcf_index = np.argmin(cost_miss * prior_target * (1 - tpr) + cost_fa * (1 - prior_target) * fpr)
+    dcf_threshold = thresholds_roc[dcf_index]
+    best_recall = tpr[dcf_index]
+    best_precision = 1 - fpr[dcf_index]
+    print("cost_miss: {0}, cost_fa: {1}".format(cost_miss, cost_fa))
+    print("prior_target: {0}".format(prior_target))
+    print("DCF: {0:f}".format(dcf))
+    print("DCF threshold: {0}".format(dcf_threshold))
+    print("DCF p_miss: {0}".format(1 - tpr[dcf_index]))
+    print("DCF p_fa: {0}".format(fpr[dcf_index]))
+    print("DCF best recall: {0}".format(best_recall))
+    print("DCF best precision: {0}".format(best_precision))
+    # print("DCF fa_per_hour: {0}".format(fpr[dcf_index]*shift_per_hour))
+    # f_out_csv.write("{}\n".format(", ".join([str(word_id), str(roc_auc), str(cost_miss), str(cost_fa), str(prior_target), str(dcf), str(dcf_threshold), str(1-tpr[dcf_index]), str(fpr[dcf_index]), str(fpr[dcf_index]*shift_per_hour)])))
+
+
+def result_analysis(result_label_score_path):
+    all_results = []
+    # y_true = []
+    # y_scores = []
+    with open(result_label_score_path, 'r') as f:
+        for line in f:
+            parts = line.strip().split('\t')
+            if len(parts) < 4:
+                continue
+            phone_index, label, score, phone_id = parts
+            all_results.append([phone_index, float(label), float(score), phone_id])
+        y_true = [int(res[1]) for res in all_results]
+        print("length of y_true: {}".format(len(y_true)))
+        print(y_true[:10])
+        y_scores = [res[2] for res in all_results]
+        print("length of y_scores: {}".format(len(y_scores)))
+        print(y_scores[:10])
+        print(len(y_true), len(y_scores))
+    plot_roc_curve(y_true, y_scores, os.path.dirname(result_label_score_path), "analysis", "all")
+    plot_pr_curve(y_true, y_scores, os.path.dirname(result_label_score_path), "analysis", "all")
+    compute_dcf(
+        y_true, y_scores, cost_miss=1.0, cost_fa=1.0, prior_target=0.5
+    )
+
 if __name__ == '__main__':
 
     test_config_path = sys.argv[1]
@@ -177,4 +276,4 @@ if __name__ == '__main__':
         result_label_score_path,
         sop_token
     )
-    # result_analysis()
+    result_analysis(result_label_score_path)

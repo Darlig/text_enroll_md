@@ -160,9 +160,11 @@ def load_dataset(wav_scp_path, phone_path, human_label_path):
 
 def plot_roc_curve(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
     fpr, tpr, thresholds = roc_curve(ref_score, hyp_score)
-    print("fpr tpr thresholds")
-    for i in range(10):
-        print("{} {} {}".format(fpr[i], tpr[i], thresholds[i]))
+    # print("fpr tpr thresholds")
+    # for i in range(10):
+    #     print("{} {} {}".format(fpr[i], tpr[i], thresholds[i]))
+    # for i in range(len(fpr) - 20, len(fpr)):
+    #     print("{} {} {}".format(fpr[i], tpr[i], thresholds[i]))
 
     roc_auc = auc(fpr, tpr)
 
@@ -184,9 +186,11 @@ def plot_pr_curve(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
     # from sklearn.metrics import precision_recall_curve
 
     precision, recall, thresholds = precision_recall_curve(ref_score, hyp_score)
-    print("precision recall thresholds")
-    for i in range(10):
-        print("{} {} {}".format(precision[i], recall[i], thresholds[i]))
+    # print("precision recall thresholds")
+    # for i in range(20):
+    #     print("{} {} {}".format(precision[i], recall[i], thresholds[i]))
+    # for i in range(len(precision) - 10, len(precision) -1):
+    #     print("{} {} {}".format(precision[i], recall[i], thresholds[i]))
 
     plt.figure()
     plt.plot(recall, precision, color='darkorange', lw=2, marker='o')
@@ -240,12 +244,13 @@ def result_analysis(result_label_score_path):
                 continue
             phone_index, label, score, phone_id = parts
             all_results.append([phone_index, float(label), float(score), phone_id])
-        y_true = [int(res[1]) for res in all_results]
-        print("length of y_true: {}".format(len(y_true)))
-        print(y_true[:10])
-        y_scores = [res[2] for res in all_results]
-        print("length of y_scores: {}".format(len(y_scores)))
-        print(y_scores[:10])
+        # reverse human label and model score because a mispronounciation is a positive sample
+        y_true = [ 1 - int(res[1]) for res in all_results ]
+        # print("length of y_true: {}".format(len(y_true)))
+        # print(y_true[:10])
+        y_scores = [ 1 - res[2] for res in all_results ]
+        # print("length of y_scores: {}".format(len(y_scores)))
+        # print(y_scores[:10])
         print(len(y_true), len(y_scores))
     plot_roc_curve(y_true, y_scores, os.path.dirname(result_label_score_path), "analysis", "all")
     plot_pr_curve(y_true, y_scores, os.path.dirname(result_label_score_path), "analysis", "all")

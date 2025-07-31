@@ -211,6 +211,8 @@ def compute_dcf(y_true, y_scores, cost_miss, cost_fa, prior_target):
     fpr, tpr, thresholds_roc = roc_curve(y_true, y_scores)
     print("skip first row of roc_curve with threshold inf")
     fpr, tpr, thresholds_roc = fpr[1:], tpr[1:], thresholds_roc[1:]
+    precision, recall, thresholds_pr = precision_recall_curve(y_true, y_scores)
+
     roc_thresh_dict = {}
     for i in range(len(fpr)):
         roc_thresh_dict[thresholds_roc[i]] = (fpr[i], tpr[i])
@@ -220,7 +222,9 @@ def compute_dcf(y_true, y_scores, cost_miss, cost_fa, prior_target):
     dcf_index = np.argmin(cost_miss * prior_target * (1 - tpr) + cost_fa * (1 - prior_target) * fpr)
     dcf_threshold = thresholds_roc[dcf_index]
     best_recall = tpr[dcf_index]
-    best_precision = 1 - fpr[dcf_index]
+    # best_precision = 1 - fpr[dcf_index]
+    dcf_index_pr = np.argmin(abs(dcf_threshold - thresholds_pr))
+    best_precision = precision[dcf_index_pr]
     print("cost_miss: {0}, cost_fa: {1}".format(cost_miss, cost_fa))
     print("prior_target: {0}".format(prior_target))
     print("DCF: {0:f}".format(dcf))

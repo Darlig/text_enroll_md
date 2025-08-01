@@ -202,6 +202,20 @@ def plot_pr_curve(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
     plt_path = os.path.join(test_result_dir, 'unet.transformer_{}_pr.png'.format("{}-{}".format(analysis_id, word_py)))
     plt.savefig(plt_path, dpi=400)
 
+def plot_sample_distribution(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
+    assert len(ref_score) == len(hyp_score)
+    hyp_score_pos = [score for i, score in enumerate(hyp_score) if ref_score[i] == 1]
+    hyp_score_neg = [score for i, score in enumerate(hyp_score) if ref_score[i] == 0]
+    plt.figure()
+    plt.hist(hyp_score_pos, bins=50, alpha=0.5, label='Positive Samples', color='blue')
+    plt.hist(hyp_score_neg, bins=50, alpha=0.5, label='Negative Samples', color='red')
+    plt.xlabel('Hypothesis Score')
+    plt.ylabel('Frequency')
+    plt.title('Sample Distribution for {}'.format(word_py))
+    plt.legend()
+    plt_path = os.path.join(test_result_dir, 'unet.transformer_{}_sample_distribution.png'.format("{}-{}".format(analysis_id, word_py)))
+    plt.savefig(plt_path, dpi=400)
+
 # def compute_dcf(y_true, y_scores, cost_miss, cost_fa, prior_target, test_result_dir, analysis_id, word_id, roc_auc, f_out_csv):
 def compute_dcf(y_true, y_scores, cost_miss, cost_fa, prior_target):
     assert cost_miss > 0 and cost_miss <= 1
@@ -258,6 +272,7 @@ def result_analysis(result_label_score_path):
         print(len(y_true), len(y_scores))
     plot_roc_curve(y_true, y_scores, os.path.dirname(result_label_score_path), "analysis", "all")
     plot_pr_curve(y_true, y_scores, os.path.dirname(result_label_score_path), "analysis", "all")
+    plot_sample_distribution(y_true, y_scores, os.path.dirname(result_label_score_path), "analysis", "all")
     compute_dcf(
         y_true, y_scores, cost_miss=1.0, cost_fa=1.0, prior_target=0.5
     )

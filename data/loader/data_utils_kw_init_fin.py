@@ -121,6 +121,65 @@ def substitution_neg(positive_keyword: List[int], aux_lexicon: Dict, negative_ke
     #print("sub neg positive_keyword: {}, sample_neg: {}".format(positive_keyword, keyword))
     return keyword
 
+
+def substitution_neg_by_lex(positive_keyword: List[int], aux_lexicon) -> List[int]:
+    #print("substitution_neg")
+    n_sub = 1
+    lexicon_by_init = aux_lexicon.get('by_init')
+    lexicon_by_final = aux_lexicon.get('by_final')
+    if len(positive_keyword) > 3:
+        n_sub = random.randint(2, len(positive_keyword)-1)
+    positive_idx = [x for x in range(len(positive_keyword))] 
+    sub_idx = random.sample(positive_idx, k=n_sub)
+    keyword = []
+    positive_target = [ 1 for _ in range(len(positive_keyword)) ]
+    target = []
+    for x, one_word in enumerate(positive_keyword):
+        if x not in sub_idx:
+            keyword.extend(unfold_list(one_word))
+        elif len(one_word) != 2:
+            keyword.extend(unfold_list(one_word))
+            # keyword.append(one_word)
+        else:
+            pos_init = one_word[0]
+            pos_final = one_word[1]
+            is_sub_init = random.randint(0,1)
+            if is_sub_init:
+                try:
+                    candidate_init = [ i for i in lexicon_by_final[str(pos_final)] if i != pos_init ]
+                    if len(candidate_init) < 2:
+                        return positive_keyword, positive_target
+                except:
+                    print("get init list by final error: init: {}, final: {}".format(pos_init, pos_final))
+                    return positive_keyword, positive_target
+                try:
+                    one_sub_init = random.sample(candidate_init, k=1)
+                except:
+                    print("init sample error: candidate_init: {}, lexicon_by_final[str(pos_final)]: {}, final: {}".format(candidate_init, lexicon_by_final[str(pos_final)], pos_final))
+                    return positive_keyword, positive_target
+                one_sub_word = [one_sub_init[0], pos_final]
+                one_sub_target = [0, 1]
+            else:
+                try:
+                    candidate_final = [ f for f in lexicon_by_init[str(pos_init)] if f != pos_final ]
+                    if len(candidate_final) < 2:
+                        return positive_keyword, positive_target
+                except:
+                    print("get final list by init error: init: {}, final: {}".format(pos_init, pos_final))
+                    return positive_keyword, positive_target
+                try:
+                    one_sub_final = random.sample(candidate_final, k=1)
+                except:
+                    print("final sample error: candidate_final: {}, lexicon_by_init[str(pos_init)]: {}, init: {}".format(candidate_final, lexicon_by_init[str(pos_init)], pos_init))
+                one_sub_word = [pos_init, one_sub_final[0]]
+                one_sub_target = [1, 0]
+            keyword.append(unfold_list(one_sub_word))
+            target.append(one_sub_target)
+            target = torch.tensor(target)
+    #print("sub neg positive_keyword: {}, sample_neg: {}".format(positive_keyword, keyword))
+    return keyword, target
+
+
 def substitution_neg_md(positive_keyword: List[int], aux_lexicon: Dict, max_sub_ratio: float=0.5, min_sub: int=1) -> List[int]:
     char_phones = aux_lexicon.get('by_len')['1']
 
@@ -755,7 +814,10 @@ def make_keyword_md(
 
     dice = random.uniform(0,1)
     if dice > positive_prob: # negtivae sample
-        keyword, target = substitution_neg_md(keyword, aux_lexicon, max_sub_ratio)
+        # keyword, target = substitution_neg_md(keyword, aux_lexicon, max_sub_ratio)
+        keyword, target = substitution_neg_by_lex(keyword, aux_lexicon)
+        keyword = unfold_list(keyword)
+        target = unfold_list(target)
         keyword_pos = -1
         pos = False
     return (keyword, keyword_pos, len(keyword), pos, target)

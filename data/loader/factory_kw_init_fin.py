@@ -462,11 +462,24 @@ def process_sampled_keyword_from_label_md(
             corrupt_label=corrupt_label, min_keyword_len=min_keyword_len, max_keyword_len=max_keyword_len, aux_lexicon=aux_lexicon,
             sample_func="sample_kw_from_label", max_sub_ratio=0.5
         )
+        # if len(kw) != len(target):
+        #     print("process_sampled_keyword_from_label_md() -> ======== keyword: {}, target: {}".format(kw, target))
+        #     exit()
+        # if len(utils.unfold_list(kw)) != len(utils.unfold_list(target.tolist())):
+        #     print("process_sampled_keyword_from_label_md() -> ============== keyword: {}, target: {}".format(kw, target))
+        #     exit()
         kw, new_phn_label, new_bpe_label, kw_pos = utils.inject_special_token_md(
             keyword=kw, keyword_length=kw_length, positive=pos, label=new_phn_label, 
             keyword_pos=kw_pos, special_token=special_token,  bpe_label=new_bpe_label, bpe_candidate=bpe_candidate
         )
+        # print("process_sampled_keyword_from_label_md() -> keyword len: {}, target len: {}".format(len(kw), len(target)))
+        # if len(kw) != 2 * len(target):
+        #     print("process_sampled_keyword_from_label_md() -> ============== keyword: {}, target: {}".format(kw, target))
+        #     exit()
 
+        # if len(utils.unfold_list(kw)) != 2* len(utils.unfold_list(target.tolist())):
+        #     print("process_sampled_keyword_from_label_md() -> ============== keyword: {}, target: {}".format(kw, target))
+        #     exit()
         sample.update({'keyword': kw, 'phn_label': new_phn_label, 'bpe_label': new_bpe_label, 'target': target}) 
         yield sample
 
@@ -635,6 +648,7 @@ def process_list_data(dataset):
         for key, value in sample.items():
             if key in NONE_TENSOR_KEY:
                 continue
+            # org_value = copy.deepcopy(value)
             if isinstance(value, list):
                 value = utils.unfold_list(value)
             if not isinstance(value, torch.Tensor):
@@ -659,6 +673,10 @@ def make_length(dataset):
             length = value.size(0)
             length_info.update({new_key: torch.tensor(length)})
         sample.update(length_info)
+        # if sample["keyword_len"] != 2 * len(sample["target"]):
+        #     print("make_length () -> ========== keyword_len: {}, target_len: {}".format(sample["keyword_len"], len(sample["target"])))
+        #     print("make_length () -> ========== keyword: {}, target: {}".format(sample["keyword"], sample["target"]))
+        #     exit()
         yield sample
 
 # fetch keys

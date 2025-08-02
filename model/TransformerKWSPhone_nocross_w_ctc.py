@@ -274,6 +274,8 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
     def forward(self, input_data):
 
         sph_input, sph_len, phn_label, phn_len, kw_label, kw_len, target = input_data
+        # print("kw_label size: {}".format(kw_label.size()))
+        # print("target size: {}".format(target.size()))
         b,t,d = sph_input.size()
         sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
         sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
@@ -307,7 +309,10 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
             sph_kw_emb, _ = tf_layer(sph_kw_emb, sph_kw_mask, cross_input=None)
 
             # detection loss
+            # print("kw_emb size: {}".format(kw_emb.size()))
             det_result_layer = self.det_net(sph_kw_emb[:,0:kw_emb.size(1):2,:])
+            # print("det_result_layer size: {}".format(det_result_layer.size()))
+            # print("target size: {}".format(target.size()))
             det_loss_layer = self.det_crit(det_result_layer[:,:,0], target.to(torch.float32))
             det_loss += det_loss_layer / len(self.au_kw_transformer)
             detail_loss['det_loss_layer_{}'.format(i)] = det_loss_layer.clone().detach()

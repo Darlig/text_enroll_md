@@ -123,7 +123,6 @@ def substitution_neg(positive_keyword: List[int], aux_lexicon: Dict, negative_ke
 
 
 def substitution_neg_by_lex(positive_keyword: List[int], aux_lexicon) -> List[int]:
-    #print("substitution_neg")
     n_sub = 1
     lexicon_by_init = aux_lexicon.get('by_init')
     lexicon_by_final = aux_lexicon.get('by_final')
@@ -132,14 +131,25 @@ def substitution_neg_by_lex(positive_keyword: List[int], aux_lexicon) -> List[in
     positive_idx = [x for x in range(len(positive_keyword))] 
     sub_idx = random.sample(positive_idx, k=n_sub)
     keyword = []
-    positive_target = [ 1 for _ in range(len(positive_keyword)) ]
+    positive_keyword_unfold = unfold_list(positive_keyword)
+    positive_target = [ 1 for _ in range(len(positive_keyword_unfold)) ]
     target = []
     for x, one_word in enumerate(positive_keyword):
         if x not in sub_idx:
             keyword.extend(unfold_list(one_word))
+            target.extend([1 for _ in range(len(unfold_list(one_word)))])
+            # if len(keyword) != len(target):
+            #     print("substitution_neg_by_lex() -> ========== keyword len: {}, target len: {}".format(len(keyword), len(target)))
+            #     print("substitution_neg_by_lex() -> ========== keyword: {}, target: {}".format(keyword, target))
+            #     exit()
         elif len(one_word) != 2:
             keyword.extend(unfold_list(one_word))
             # keyword.append(one_word)
+            target.extend([1 for _ in range(len(unfold_list(one_word)))])
+            # if len(keyword) != len(target):
+            #     print("substitution_neg_by_lex() -> ========== keyword len: {}, target len: {}".format(len(keyword), len(target)))
+            #     print("substitution_neg_by_lex() -> ========== keyword: {}, target: {}".format(keyword, target))
+            #     exit()
         else:
             pos_init = one_word[0]
             pos_final = one_word[1]
@@ -148,34 +158,52 @@ def substitution_neg_by_lex(positive_keyword: List[int], aux_lexicon) -> List[in
                 try:
                     candidate_init = [ i for i in lexicon_by_final[str(pos_final)] if i != pos_init ]
                     if len(candidate_init) < 2:
-                        return positive_keyword, positive_target
+                        return positive_keyword_unfold, positive_target
                 except:
                     print("get init list by final error: init: {}, final: {}".format(pos_init, pos_final))
-                    return positive_keyword, positive_target
+                    return positive_keyword_unfold, positive_target
                 try:
                     one_sub_init = random.sample(candidate_init, k=1)
                 except:
                     print("init sample error: candidate_init: {}, lexicon_by_final[str(pos_final)]: {}, final: {}".format(candidate_init, lexicon_by_final[str(pos_final)], pos_final))
-                    return positive_keyword, positive_target
+                    return positive_keyword_unfold, positive_target
                 one_sub_word = [one_sub_init[0], pos_final]
                 one_sub_target = [0, 1]
             else:
                 try:
                     candidate_final = [ f for f in lexicon_by_init[str(pos_init)] if f != pos_final ]
                     if len(candidate_final) < 2:
-                        return positive_keyword, positive_target
+                        return positive_keyword_unfold, positive_target
                 except:
                     print("get final list by init error: init: {}, final: {}".format(pos_init, pos_final))
-                    return positive_keyword, positive_target
+                    return positive_keyword_unfold, positive_target
                 try:
                     one_sub_final = random.sample(candidate_final, k=1)
                 except:
                     print("final sample error: candidate_final: {}, lexicon_by_init[str(pos_init)]: {}, init: {}".format(candidate_final, lexicon_by_init[str(pos_init)], pos_init))
                 one_sub_word = [pos_init, one_sub_final[0]]
                 one_sub_target = [1, 0]
-            keyword.append(unfold_list(one_sub_word))
-            target.append(one_sub_target)
-            target = torch.tensor(target)
+            # if len(one_sub_word) != len(one_sub_target):
+            #     print("substitution_neg_by_lex() -> ========== one_sub_word len: {}, one_sub_target len: {}".format(len(one_sub_word), len(one_sub_target)))
+            #     print("substitution_neg_by_lex() -> ========== one_sub_word: {}, one_sub_target: {}".format(one_sub_word, one_sub_target))
+            #     exit()
+            keyword.extend(unfold_list(one_sub_word))
+            target.extend(one_sub_target)
+            # print("substitution_neg_by_lex() -> length of keyword: {}, length of target: {}".format(len(keyword), len(target)))
+            # print("substitution_neg_by_lex() -> keyword: {}, target: {}".format(keyword, target))
+    # if len(unfold_list(keyword)) != len(unfold_list(target)):
+    #     print("substitution_neg_by_lex() -> ========== keyword len: {}, target len: {}".format(len(keyword), len(target)))
+    #     print("substitution_neg_by_lex() -> ========== keyword: {}, target: {}".format(keyword, target))
+    #     exit()
+    target = torch.tensor(target)
+    # if isinstance(target, torch.Tensor):
+    #     target_unfold = unfold_list(target.tolist())
+    # elif isinstance(target, list):
+    #     target_unfold = unfold_list(target)
+    # if len(unfold_list(keyword)) != len(target_unfold):
+    #     print("substitution_neg_by_lex() -> ========== keyword len: {}, target len: {}".format(len(keyword), len(target)))
+    #     print("substitution_neg_by_lex() -> ========== keyword: {}, target: {}".format(keyword, target))
+    #     exit()
     #print("sub neg positive_keyword: {}, sample_neg: {}".format(positive_keyword, keyword))
     return keyword, target
 
@@ -747,6 +775,9 @@ def inject_special_token_md(
         positive: bool=True, keyword_pos: int=None, special_token: Dict={}, bpe_label: List=None, 
         bpe_candidate: List=None
     )->Tuple[List, List, List, int]:
+    # print(keyword)
+    # exit()
+    org_keyword_len = len(keyword)
     TEXT_SPEC_TOKEN.update(special_token)
     new_phn_label = copy.deepcopy(label)
     new_bpe_label = copy.deepcopy(bpe_label) if bpe_label else [0]
@@ -764,8 +795,8 @@ def inject_special_token_md(
         new_phn_label = new_phn_label + [TEXT_SPEC_TOKEN['eos']] 
     
     if TEXT_SPEC_TOKEN['sop'] != None: # start of phone
-        for i in range(len(new_keyword)):
-            new_keyword.insert(i*2, [TEXT_SPEC_TOKEN['sop']])
+        for i in range(org_keyword_len):
+            new_keyword.insert(i*2, TEXT_SPEC_TOKEN['sop'])
 
     if TEXT_SPEC_TOKEN['psok'] != None: # start of keyword
         new_keyword.insert(0, [TEXT_SPEC_TOKEN['psok']])
@@ -783,6 +814,9 @@ def inject_special_token_md(
             bpe_kw.insert(len(bpe_kw), [TEXT_SPEC_TOKEN['eok']])
             new_bpe_label[bpe_kw_head: bpe_kw_tail + 1] = bpe_kw
 
+    # if len(new_keyword) != 2 * org_keyword_len:
+    #     print("inject_special_token_md() -> ############ original keyword: {}, new keyword: {}".format(keyword, new_keyword))
+    #     exit()
     return (new_keyword, new_phn_label, new_bpe_label, keyword_pos)
 
 # snipe_edges for waveform
@@ -807,19 +841,45 @@ def make_keyword_md(
     ) -> Tuple[List, int, int, bool, List]:
 
     keyword, keyword_pos = sample_keyword(candidate_seq, segment_seq, kw_position_candidate, min_keyword_len, max_keyword_len, sample_func)
-    keyword_ = keyword[:]
-    keyword = unfold_list(keyword_)
+    # keyword_unfold = unfold_list(keyword)
     pos = True
-    target = torch.tensor([1]*len(keyword))
+    # target = torch.tensor([1]*len(keyword_unfold))
+    # print("make_keyword_md() -> keyword len: {}, keyword_unfold len: {}, target len: {}".format(len(keyword), len(keyword_unfold), len(target)))
 
     dice = random.uniform(0,1)
     if dice > positive_prob: # negtivae sample
         # keyword, target = substitution_neg_md(keyword, aux_lexicon, max_sub_ratio)
         keyword, target = substitution_neg_by_lex(keyword, aux_lexicon)
-        keyword = unfold_list(keyword)
-        target = unfold_list(target)
+        # if isinstance(target, torch.Tensor):
+        #     target_unfold = unfold_list(target.tolist())
+        # elif isinstance(target, list):
+        #     target_unfold = unfold_list(target)
+        # if len(unfold_list(keyword)) != len(target_unfold):
+        #     print("make_keyword_md() -> dice > positive_prob -> length of keyword: {}, length of target: {}".format(len(keyword), len(target)))
+        #     print("make_keyword_md() -> dice > positive_prob -> keyword: {}, target: {}".format(keyword, target))
+
         keyword_pos = -1
         pos = False
+    else:
+        keyword_ = keyword[:]
+        keyword = unfold_list(keyword_)
+        target = torch.tensor([1]*len(keyword))
+        # if isinstance(target, torch.Tensor):
+        #     target_unfold = unfold_list(target.tolist())
+        # elif isinstance(target, list):
+        #     target_unfold = unfold_list(target)
+        # if len(unfold_list(keyword)) != len(target_unfold):
+        #     print("make_keyword_md() -> dice <= positive_prob -> length of keyword: {}, length of target: {}".format(len(keyword), len(target)))
+        #     print("make_keyword_md() -> dice <= positive_prob -> keyword: {}, target: {}".format(keyword, target))
+    # keyword = keyword_unfold
+    # if isinstance(target, torch.Tensor):
+    #     target_unfold = unfold_list(target.tolist())
+    # elif isinstance(target, list):
+    #     target_unfold = unfold_list(target)
+    # if len(unfold_list(keyword)) != len(target_unfold):
+    #     print("make_keyword_md() -> ========== length of keyword: {}, length of target: {}".format(len(keyword), len(target)))
+    #     print("make_keyword_md() -> ========== keyword: {}, target: {}".format(keyword, target))
+    #     exit()
     return (keyword, keyword_pos, len(keyword), pos, target)
 
 

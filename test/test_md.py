@@ -45,24 +45,6 @@ def load_dict_from_file(file_path):
     return new_dict
 
 
-    #  1 {
-    #  2     "c0860096": {
-    #  3         "text": "钟",
-    #  4         "words": [
-    #  5             {
-    #  6                 "text": "钟",
-    #  7                 "phones": [
-    #  8                     "zh",
-    #  9                     "ong1"
-    # 10                 ],
-    # 11                 "phones-accuracy": [
-    # 12                     1,
-    # 13                     1
-    # 14                 ]
-    # 15             }
-    # 16         ]
-    # 17     },
-
 def load_human_score_json(file_path):
     human_labels_dict = {}
     with open(file_path) as f:
@@ -182,7 +164,7 @@ def plot_roc_curve(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
     plt.savefig(plt_path, dpi=400)
     return roc_auc
 
-def plot_pr_curve(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
+def plot_pr_curve_and_analysis(ref_score, hyp_score, test_result_dir, analysis_id, word_py, target_precison):
     # from sklearn.metrics import precision_recall_curve
 
     precision, recall, thresholds = precision_recall_curve(ref_score, hyp_score)
@@ -191,6 +173,12 @@ def plot_pr_curve(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
     #     print("{} {} {}".format(precision[i], recall[i], thresholds[i]))
     # for i in range(len(precision) - 10, len(precision) -1):
     #     print("{} {} {}".format(precision[i], recall[i], thresholds[i]))
+
+    # find the threshold that gives the target precision
+    target_precision_index = np.argmin(np.abs(precision - target_precison))
+    target_recall = recall[target_precision_index]
+    target_threshold = thresholds[target_precision_index]
+    print("target precision: {}, recall: {}, threshold: {}".format(target_precison, target_recall, target_threshold))
 
     plt.figure()
     plt.plot(recall, precision, color='darkorange', lw=2, marker='o')

@@ -259,7 +259,7 @@ def result_analysis(result_label_score_path):
         # print(y_scores[:10])
         print(len(y_true), len(y_scores))
     plot_roc_curve(y_true, y_scores, os.path.dirname(result_label_score_path), "analysis", "all")
-    plot_pr_curve(y_true, y_scores, os.path.dirname(result_label_score_path), "analysis", "all")
+    plot_pr_curve_and_analysis(y_true, y_scores, os.path.dirname(result_label_score_path), "analysis", "all", 0.21)
     plot_sample_distribution(y_true, y_scores, os.path.dirname(result_label_score_path), "analysis", "all")
     compute_dcf(
         y_true, y_scores, cost_miss=1.0, cost_fa=1.0, prior_target=0.5

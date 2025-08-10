@@ -2,3 +2,10 @@
 *.pyc
 config/
 *.png
+exp/
+resource/
+resources/
+result/
+result.dragon03/
+tensorboard/
+tensorboard.dragon03/

@@ -371,13 +371,13 @@ class TransformerKWSPhone_nocross_wo_ctc(nn.Module):
         
         # print("det_result size: {}".format(det_result.size()))
         # print("sph_kw_emb size: {}".format(sph_kw_emb.size()))
-        sph_emb = sph_kw_emb[:,kw_emb.size(1):,:]
+        # sph_emb = sph_kw_emb[:,kw_emb.size(1):,:]
 
-        phn_asr_hyp = self.phn_asr_crit.get_hyp(sph_emb)
+        # phn_asr_hyp = self.phn_asr_crit.get_hyp(sph_emb)
 
 
         # decoder output 
-        return det_result, phn_asr_hyp
+        return det_result
 
 
     @torch.no_grad()

@@ -161,7 +161,7 @@ class TransformerKWSPhone_nocross_wo_ctc(nn.Module):
             'num_tokens': num_phn_token,
             'front_output_size': au_hidden_dim 
         }
-        self.phn_asr_crit = NM.CTC(**phn_ctc_conf)
+        #self.phn_asr_crit = NM.CTC(**phn_ctc_conf)
 
         # detection net
         self.det_net = nn.Sequential(

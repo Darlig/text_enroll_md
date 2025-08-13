@@ -317,18 +317,22 @@ class Trainer():
         self.model.load_state_dict(model)
         return step
         
-    def need_to_load(self, key):
-        if key.startswith('au_'):
-            return True
-        if key.startswith('det_net'):
-            return True
+    def need_to_load(self, key, pretrained_module_prefix):
+        for module_prefix in pretrained_module_prefix:
+            if key.startswith(module_prefix):
+                return True
+        #if key.startswith('au_'):
+        #    return True
+        #if key.startswith('det_net'):
+        #    return True
         return False
 
     def load_ckpt_part(self, ckpt):
         ckpt_dict = torch.load(ckpt, map_location='cpu')
         model_dict = self.model.state_dict()
         pretrained_dict = ckpt_dict['model']
-        filtered_dict = {k: v for k, v in pretrained_dict.items() if self.need_to_load(k)}
+        pretrained_module_prefix = self.exp_config['pretrained_module_prefix']
+        filtered_dict = {k: v for k, v in pretrained_dict.items() if self.need_to_load(k, pretrained_module_prefix)}
         model_dict.update(filtered_dict)
         opt = ckpt_dict['opt']
         step = ckpt_dict['step']

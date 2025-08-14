@@ -743,3 +743,27 @@ def make_dynamic_batch(data, batch_size=1024):
             buf = []
     if len(buf) > 0:
         yield buf
+
+def data_statistic(data, interval=100):
+    data_count = {'phn_pos': 0, 'phn_neg': 0, 'word_pos': 0, 'word_neg': 0}
+    for batch in data:
+        for sample in batch:
+            target = sample['target'].tolist()
+            if 0 in target:
+                data_count['word_neg'] += 1
+            else:
+                data_count['word_pos'] += 1
+            for t in target:
+                if t == 1:
+                    data_count['phn_pos'] += 1
+                else:
+                    data_count['phn_neg'] += 1
+            n_phn_pos = data_count['phn_pos']
+            n_phn_neg = data_count['phn_neg']
+            n_word_pos = data_count['word_pos']
+            n_word_neg = data_count['word_neg']
+            n_phn_all = n_phn_pos + n_phn_neg
+            n_word_all = n_word_pos + n_word_neg
+            if n_word_all % interval == 0:
+                print("data_statistic () -> ========== phn_pos: {:.4f}, phn_neg: {:.4f}, word_pos: {:.4f}, word_neg: {:.4f}".format(n_phn_pos/n_phn_all, n_phn_neg/n_phn_all, n_word_pos/n_word_all, n_word_neg/n_word_all))
+        yield batch

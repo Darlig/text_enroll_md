@@ -468,7 +468,7 @@ def process_sampled_keyword_from_label_md(
         # if len(utils.unfold_list(kw)) != len(utils.unfold_list(target.tolist())):
         #     print("process_sampled_keyword_from_label_md() -> ============== keyword: {}, target: {}".format(kw, target))
         #     exit()
-        kw, new_phn_label, new_bpe_label, kw_pos = utils.inject_special_token_md(
+        kw, new_phn_label, new_bpe_label, kw_pos, kw_spec_mask = utils.inject_special_token_md(
             keyword=kw, keyword_length=kw_length, positive=pos, label=new_phn_label, 
             keyword_pos=kw_pos, special_token=special_token,  bpe_label=new_bpe_label, bpe_candidate=bpe_candidate
         )
@@ -480,7 +480,7 @@ def process_sampled_keyword_from_label_md(
         # if len(utils.unfold_list(kw)) != 2* len(utils.unfold_list(target.tolist())):
         #     print("process_sampled_keyword_from_label_md() -> ============== keyword: {}, target: {}".format(kw, target))
         #     exit()
-        sample.update({'keyword': kw, 'phn_label': new_phn_label, 'bpe_label': new_bpe_label, 'target': target}) 
+        sample.update({'keyword': kw, 'phn_label': new_phn_label, 'bpe_label': new_bpe_label, 'target': target, 'kw_spec_mask': kw_spec_mask}) 
         yield sample
 
 # process permuate label
@@ -673,10 +673,6 @@ def make_length(dataset):
             length = value.size(0)
             length_info.update({new_key: torch.tensor(length)})
         sample.update(length_info)
-        # if sample["keyword_len"] != 2 * len(sample["target"]):
-        #     print("make_length () -> ========== keyword_len: {}, target_len: {}".format(sample["keyword_len"], len(sample["target"])))
-        #     print("make_length () -> ========== keyword: {}, target: {}".format(sample["keyword"], sample["target"]))
-        #     exit()
         yield sample
 
 # fetch keys

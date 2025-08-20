@@ -165,9 +165,9 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
 
         # detection net
         self.det_net = nn.Sequential(
-            NM.FNNBlock(**au_feed_forward_config), nn.Linear(au_hidden_dim, 1), nn.Sigmoid()
+            NM.FNNBlock(**au_feed_forward_config), nn.Linear(au_hidden_dim, 1)
         )
-        self.det_crit = nn.BCELoss(reduction='mean')
+        self.det_crit = nn.BCEWithLogitsLoss(reduction='mean')
 
 
     def forward_transformer(
@@ -273,14 +273,17 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
 
     def forward(self, input_data):
 
-        sph_input, sph_len, phn_label, phn_len, kw_label, kw_len, target = input_data
-        # print("kw_label size: {}".format(kw_label.size()))
-        # print("target size: {}".format(target.size()))
+        sph_input, sph_len, phn_label, phn_len, kw_label, kw_len, kw_spec_mask, target, target_len = input_data
         b,t,d = sph_input.size()
         sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
         sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
         sph_mask = ~NM.make_mask(sph_len).unsqueeze(1)
         kw_mask = ~NM.make_mask(kw_len).unsqueeze(1)
+        # print("kw_len: {}, kw_label: {}, kw_spec_mask: {}, target: {}".format(kw_len, kw_label, kw_spec_mask, target))
+        kw_loss_mask = ((~NM.make_mask(kw_len)) & (kw_spec_mask > 0))
+        # print("kw_loss_mask: {}".format(kw_loss_mask))
+        kw_loss_mask_flat = kw_loss_mask.reshape(-1)
+        target_select = torch.cat([target[i][:j] for i, j in enumerate(target_len)], dim=0).to(torch.float32)
 
         # embedding
         sph_emb = self.au_conv(sph_input.unsqueeze(1))
@@ -309,11 +312,20 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
             sph_kw_emb, _ = tf_layer(sph_kw_emb, sph_kw_mask, cross_input=None)
 
             # detection loss
-            # print("kw_emb size: {}".format(kw_emb.size()))
-            det_result_layer = self.det_net(sph_kw_emb[:,0:kw_emb.size(1):2,:])
-            # print("det_result_layer size: {}".format(det_result_layer.size()))
-            # print("target size: {}".format(target.size()))
-            det_loss_layer = self.det_crit(det_result_layer[:,:,0], target.to(torch.float32))
+
+            det_logit_layer = self.det_net(sph_kw_emb[:,0:kw_emb.size(1),:])
+            det_logit_layer_flat = det_logit_layer[:,:,0].reshape(-1)
+            # print("det_logit_layer: {}".format(det_logit_layer))
+            # print("kw_loss_mask_flat: {}".format(kw_loss_mask_flat))
+            det_logit_layer_select = det_logit_layer_flat[kw_loss_mask_flat]
+
+            # print("det_logit_layer_select size: {}".format(det_logit_layer_select.size()))
+            # print("target_select size: {}".format(target_select.size()))
+            # print("det_logit_layer_select: {}".format(det_logit_layer_select))
+            # print("target_select: {}".format(target_select))
+            det_loss_layer = self.det_crit(det_logit_layer_select, target_select)
+            # kw_loss_mask = ((~kw_mask.squeeze(1)) & (kw_spec_mask > 0)).to(torch.float32)
+            # det_loss_layer = (det_loss_layer * kw_loss_mask).sum() / kw_spec_mask.sum()
             det_loss += det_loss_layer / len(self.au_kw_transformer)
             detail_loss['det_loss_layer_{}'.format(i)] = det_loss_layer.clone().detach()
         
@@ -327,10 +339,7 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
         # decoder output 
         total_loss = (0.3 * phn_ctc_loss) + (0.7 * det_loss)
         detail_loss['phn_ctc_loss'] = phn_ctc_loss.clone().detach()
-        # detail_loss = {
-        #     'phn_ctc_loss': phn_ctc_loss.clone().detach(),
-        #     'det_loss': det_loss.clone().detach()
-        # }
+
         return total_loss, detail_loss
     
 

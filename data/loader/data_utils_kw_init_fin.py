@@ -746,7 +746,7 @@ def inject_special_token_md(
         keyword: List[int], keyword_length: int, label: List=None, 
         positive: bool=True, keyword_pos: int=None, special_token: Dict={}, bpe_label: List=None, 
         bpe_candidate: List=None
-    )->Tuple[List, List, List, int]:
+    )->Tuple[List, List, List, int, List]:
     # print(keyword)
     # exit()
     org_keyword_len = len(keyword)
@@ -810,7 +810,8 @@ def sample_keyword(candidate_seq: List[Any], segment_seq: List[Any], kw_position
 def make_keyword_md(
         candidate_seq: List[Any], segment_seq: List[Any],
         positive_prob: float, num_pre_sample: Optional[int]=None, kw_position_candidate: List=None,
-        corrupt_label: List=None, min_keyword_len: int=2, max_keyword_len: int=6, aux_lexicon: Dict=None, sample_func: str='sample_kw_from_label', max_sub_ratio: float=0.5
+        corrupt_label: List=None, min_keyword_len: int=2, max_keyword_len: int=6, aux_lexicon: Dict=None, 
+        sample_func: str='sample_kw_from_label', max_sub_ratio: float=0.5, target_level: List=None
     ) -> Tuple[List, int, int, bool, List]:
 
     keyword, keyword_pos = sample_keyword(candidate_seq, segment_seq, kw_position_candidate, min_keyword_len, max_keyword_len, sample_func)
@@ -821,13 +822,17 @@ def make_keyword_md(
 
     dice = random.uniform(0,1)
     if dice > positive_prob: # negtivae sample
+        target = []
         # keyword, target = substitution_neg_md(keyword, aux_lexicon, max_sub_ratio)
-        keyword, target = substitution_neg_by_lex(keyword, aux_lexicon)
-        # insert word-level target
-        if 0 in target:
-            target.insert(0, 0)
-        else:
-            target.insert(0, 1)
+        keyword, phone_target = substitution_neg_by_lex(keyword, aux_lexicon)
+        if 'phone' in target_level:
+            target.extend(phone_target)
+        if 'word' in target_level:
+            # insert word-level target
+            if 0 in target:
+                target.insert(0, 0)
+            else:
+                target.insert(0, 1)
         target = torch.tensor(target)
 
         keyword_pos = -1
@@ -835,7 +840,13 @@ def make_keyword_md(
     else:
         keyword_ = keyword[:]
         keyword = unfold_list(keyword_)
-        target = torch.tensor([1]*(len(keyword)+1))
+        target = []
+        if 'phone' in target_level:
+            target.extend([1]*len(keyword))
+        if 'word' in target_level:
+            target.insert(0, 1)
+        target = torch.tensor(target)
+        # target = torch.tensor([1]*(len(keyword)+1))
 
     return (keyword, keyword_pos, len(keyword), pos, target)
 

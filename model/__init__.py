@@ -9,6 +9,7 @@ from model import TransformerKWSPhone_noaliloss
 from model import TransformerKWSPhone_eval_steps
 from model import TransformerKWSPhone_nocross
 from model import TransformerKWSPhone_nocross_w_ctc
+from model import TransformerKWSPhone_nocross_w_ctc_tmp_debug2_equal_to_no_spec_mask
 from model import TransformerKWSPhone_nocross_w_ctc_tmp_debug1_target_mask
 from model import TransformerKWSPhone_nocross_wo_ctc
 from model import TransformerKWSPhone_nocross_w_ctc_kw_adapter
@@ -24,6 +25,7 @@ m_dict = {
     'TransformerKWSPhone_eval_steps': TransformerKWSPhone_eval_steps.TransformerKWSPhone_eval_steps,
     'TransformerKWSPhone_nocross': TransformerKWSPhone_nocross.TransformerKWSPhone_nocross,
     'TransformerKWSPhone_nocross_w_ctc': TransformerKWSPhone_nocross_w_ctc.TransformerKWSPhone_nocross_w_ctc,
+    'TransformerKWSPhone_nocross_w_ctc_tmp_debug2_equal_to_no_spec_mask': TransformerKWSPhone_nocross_w_ctc_tmp_debug2_equal_to_no_spec_mask.TransformerKWSPhone_nocross_w_ctc_tmp_debug2_equal_to_no_spec_mask,
     'TransformerKWSPhone_nocross_w_ctc_tmp_debug1_target_mask': TransformerKWSPhone_nocross_w_ctc_tmp_debug1_target_mask.TransformerKWSPhone_nocross_w_ctc_tmp_debug1_target_mask,
     'TransformerKWSPhone_nocross_wo_ctc': TransformerKWSPhone_nocross_wo_ctc.TransformerKWSPhone_nocross_wo_ctc,
     'TransformerKWSPhone_nocross_w_ctc_kw_adapter': TransformerKWSPhone_nocross_w_ctc_kw_adapter.TransformerKWSPhone_nocross_w_ctc_kw_adapter,

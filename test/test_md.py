@@ -57,13 +57,21 @@ def load_human_score_json(file_path):
             }
     return human_labels_dict
 
-def insert_special_token(phone_seq, sop_token):
+def insert_special_token(phone_seq, target_level, special_token):
     # print("length of phone_seq: {}".format(len(phone_seq)))
-    for i in range(len(phone_seq)):
-        phone_seq.insert(i*2, sop_token)
-    return phone_seq
+    kw_spec_mask = [0] * len(phone_seq)
+    if 'phone' in target_level:
+        sop = special_token['sop']
+        for i in range(len(phone_seq)):
+            phone_seq.insert(i*2, sop)
+            kw_spec_mask.insert(i*2, 1)
+    if 'word' in target_level:
+        psok = special_token['psok']
+        phone_seq.insert(0, psok)
+        kw_spec_mask.insert(0, 1)
+    return phone_seq, kw_spec_mask
 
-def inference(model, wav_path, phones_int, sop_token):
+def inference(model, wav_path, phones_int, target_level, special_token):
     with torch.no_grad():
         # Load wav file
         wav = torchaudio.load(wav_path)[0]
@@ -76,20 +84,20 @@ def inference(model, wav_path, phones_int, sop_token):
         phones_int = [int(ph) for ph in phones_int]
         # print("phones_int shape: {}".format(len(phones_int)))
         # print("phones_int: {}".format(phones_int))
-        phones_int = insert_special_token(phones_int, sop_token)
+        phones_int, kw_spec_mask = insert_special_token(phones_int, target_level, special_token)
         # print("phones_int after insert sop token: {}".format(phones_int))
         phones_len = torch.tensor([len(phones_int)])
         phones_int = torch.tensor(phones_int, dtype=torch.int64, device='cuda:0').unsqueeze(0)
         # phones_accuracy = torch.tensor(phones_accuracy, dtype=torch.float32, device='cuda:0').unsqueeze(0)
 
-        input = (fbank, fbank_len, phones_int, phones_len)
+        input = (fbank, fbank_len, phones_int, phones_len, kw_spec_mask)
         input_data = (d.to('cuda:0') for d in input)
         det_result, hyp_result = model.evaluate(input_data)
         det_result = det_result.cpu().numpy()[0]
         hyp_result = hyp_result.cpu().numpy()[0]
         return det_result, hyp_result
 
-def test_md(model, wav_scp_path, phone_path, human_label_path, result_label_score_path, sop_token):
+def test_md(model, wav_scp_path, phone_path, human_label_path, result_label_score_path, target_level, special_token):
     if os.path.exists(result_label_score_path):
         print("Result file already exists: {}. Skip md test.".format(result_label_score_path))
         return
@@ -100,7 +108,7 @@ def test_md(model, wav_scp_path, phone_path, human_label_path, result_label_scor
             if n % 2000 == 0:
                 print("Inferencing {}th utterance: {}".format(n, uttid))
             try:
-                det_result, hyp_result = inference(model, wav_path, phones_int, sop_token)
+                det_result, hyp_result = inference(model, wav_path, phones_int, target_level, special_token)
             except Exception as e:
                 print(f"Error processing {uttid}: {e}")
                 continue
@@ -273,7 +281,10 @@ if __name__ == '__main__':
     test_config = yaml.load(open(test_config_path), Loader=yaml.FullLoader)
     trained_ckpt_path = test_config['trained_ckpt_path']
     train_config = test_config.get('train_config', None)
-    sop_token = train_config['data_config']['keyword_config']['config']['special_token']['sop']
+    # sop_token = train_config['data_config']['keyword_config']['config']['special_token']['sop']
+    keyword_config = train_config['data_config']['keyword_config']['config']
+    target_level = keyword_config['target_level']
+    special_token = keyword_config['special_token']
     result_label_score_path = test_config['result_label_score']
     if not os.path.exists(os.path.dirname(result_label_score_path)):
         os.makedirs(os.path.dirname(result_label_score_path))
@@ -286,6 +297,7 @@ if __name__ == '__main__':
         test_config['phone'],
         test_config['human_label'],
         result_label_score_path,
-        sop_token
+        target_level,
+        special_token
     )
     result_analysis(result_label_score_path)

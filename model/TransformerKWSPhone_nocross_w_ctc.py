@@ -375,12 +375,13 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
         for i, tf_layer in enumerate(self.au_kw_transformer):
             sph_kw_emb, _ = tf_layer(sph_kw_emb, sph_kw_mask, cross_input=None)
 
-            det_result = self.det_net(sph_kw_emb[:,0:kw_emb.size(1),:])[:,:,0]
-            selected_list = []
-            for bi in range(b):
-                sel_b = det_result[bi][kw_spec_mask[bi] > 0]
-                selected_list.append(sel_b)
-            det_result = pad_list(selected_list, 0.0).to(sph_kw_emb.device)
+        det_result = self.det_net(sph_kw_emb[:,0:kw_emb.size(1),:])[:,:,0]
+        selected_list = []
+        for bi in range(b):
+            sel_b = det_result[bi][kw_spec_mask[bi] > 0]
+            selected_list.append(sel_b)
+        det_result = pad_list(selected_list, 0.0).to(sph_kw_emb.device)
+        det_result = torch.sigmoid(det_result)
         
         # print("det_result size: {}".format(det_result.size()))
         # print("sph_kw_emb size: {}".format(sph_kw_emb.size()))

@@ -88,6 +88,7 @@ def inference(model, wav_path, phones_int, target_level, special_token):
         # print("phones_int after insert sop token: {}".format(phones_int))
         phones_len = torch.tensor([len(phones_int)])
         phones_int = torch.tensor(phones_int, dtype=torch.int64, device='cuda:0').unsqueeze(0)
+        kw_spec_mask = torch.tensor(kw_spec_mask, dtype=torch.int64, device='cuda:0').unsqueeze(0)
         # phones_accuracy = torch.tensor(phones_accuracy, dtype=torch.float32, device='cuda:0').unsqueeze(0)
 
         input = (fbank, fbank_len, phones_int, phones_len, kw_spec_mask)
@@ -283,9 +284,19 @@ if __name__ == '__main__':
     train_config = test_config.get('train_config', None)
     # sop_token = train_config['data_config']['keyword_config']['config']['special_token']['sop']
     keyword_config = train_config['data_config']['keyword_config']['config']
-    target_level = keyword_config['target_level']
-    special_token = keyword_config['special_token']
     result_label_score_path = test_config['result_label_score']
+    default_target_level = ['phone']
+    default_special_token = {'sop': 1}
+    if 'target_level' in keyword_config:
+        target_level = keyword_config['target_level']
+    else:
+        print("No target_level in keyword_config, use default: {}".format(default_target_level))
+        target_level = default_target_level
+    if 'special_token' in keyword_config:
+        special_token = keyword_config['special_token']
+    else:
+        print("No special_token in keyword_config, use default: {}".format(default_special_token))
+        special_token = default_special_token
     if not os.path.exists(os.path.dirname(result_label_score_path)):
         os.makedirs(os.path.dirname(result_label_score_path))
 

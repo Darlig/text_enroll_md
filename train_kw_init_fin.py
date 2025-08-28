@@ -16,6 +16,8 @@ from local.utils import WarmUpLR, read_list, Recorder
 from torch.utils.tensorboard import SummaryWriter
 import shutil
 import sys
+import json, os, tempfile
+
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -65,6 +67,12 @@ def get_args():
         default='exp/',
         help="experinments root dir"
     )
+    parser.add_argument(
+        '--resume-from',
+        type=str,
+        default=None,
+        help='Resume from an existing run_dir (contains run.json). If set, loader will restore from last_checkpoint and continue.'
+    )
 
     args = parser.parse_args()
     return args
@@ -78,6 +86,7 @@ class Trainer():
         rank: int,
         world_size: int,
         random_seed=2022,
+        resume_from=None
         #args: argparse.Namespace
     ):
         import datetime
@@ -87,41 +96,46 @@ class Trainer():
         self.data_config = config_file['data_config']
         self.exp_config = config_file['exp_config']
 
+        self.rank = rank
+        self.seed = random_seed
+        self.device = torch.device('cuda')
+        self.world_size = world_size
+        self.resume_from = resume_from
         # continue training from break point
-        if self.data_config['start_epoch'] != 0:
-            config_file = '{}/model.yaml'.format(self.exp_config['exp_dir'])
+        if resume_from:
+            run_dir = resume_from
+            self.run_dir_name = os.path.basename(os.path.normpath(run_dir))
+            self.run_dir = run_dir
+            config_file = '{}/configs/model.yaml'.format(run_dir)
             model_config = yaml.load(open(config_file), Loader=yaml.FullLoader)
             self.model_config = model_config
         else:
             self.model_config = config_file['model_config']
         self.model = model_arch(**self.model_config)
-        self.rank = rank
-        self.seed = random_seed
-        self.device = torch.device('cuda')
-        self.world_size = world_size
 
-        if self.rank == 0:
-            # Build a unique run directory name
-            self.ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-            slug = self.exp_config.get('run_slug', '') or os.environ.get('RUN_SLUG', '')
-            # sanitize slug: keep alphanum, dash, underscore only
-            if slug:
-                slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(slug)).strip("-")
-            self.run_dir_name = f"run_{self.ts}" + (f"_{slug}" if slug else "")
-            self.run_dir = os.path.join(self.exp_config['exp_dir'], self.run_dir_name)
-            try:
-                os.makedirs(self.run_dir, exist_ok=False)
-            except FileExistsError:
-                # Extremely unlikely due to timestamp; fall back to a counter
-                i = 1
-                while True:
-                    alt = os.path.join(self.exp_config['exp_dir'], f"{self.run_dir_name}_{i}")
-                    try:
-                        os.makedirs(alt, exist_ok=False)
-                        self.run_dir = alt
-                        break
-                    except FileExistsError:
-                        i += 1
+        if not resume_from:
+            if self.rank == 0:
+                # Build a unique run directory name
+                self.ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                slug = self.exp_config.get('run_slug', '') or os.environ.get('RUN_SLUG', '')
+                # sanitize slug: keep alphanum, dash, underscore only
+                if slug:
+                    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(slug)).strip("-")
+                self.run_dir_name = f"run_{self.ts}" + (f"_{slug}" if slug else "")
+                self.run_dir = os.path.join(self.exp_config['exp_dir'], self.run_dir_name)
+                try:
+                    os.makedirs(self.run_dir, exist_ok=False)
+                except FileExistsError:
+                    # Extremely unlikely due to timestamp; fall back to a counter
+                    i = 1
+                    while True:
+                        alt = os.path.join(self.exp_config['exp_dir'], f"{self.run_dir_name}_{i}")
+                        try:
+                            os.makedirs(alt, exist_ok=False)
+                            self.run_dir = alt
+                            break
+                        except FileExistsError:
+                            i += 1
 
         # init recorder        
         self.run_dir = getattr(self, 'run_dir', self.exp_config['exp_dir'])
@@ -130,6 +144,15 @@ class Trainer():
             self.rank
         )
         self.recorder = Recorder(self.exp_config, self.run_dir) 
+
+    def _read_last_epoch_from_run(self):
+        try:
+            path = os.path.join(self.run_dir, 'run.json')
+            with open(path, 'r') as f:
+                meta = json.load(f)
+            return meta.get('training_state', {}).get('last_epoch', None)
+        except Exception:
+            return None
 
 
     def backup_configs(self):
@@ -232,6 +255,34 @@ class Trainer():
         # Expose the path for later use if needed
         self.run_dir = self.run_dir
 
+    # import json, os, tempfile
+
+    def _update_run_json_atomic(self, patch: dict):
+        if self.rank != 0:
+            return
+        path = os.path.join(self.run_dir, "run.json")
+        try:
+            with open(path, "r") as f:
+                meta = json.load(f)
+        except Exception:
+            meta = {}
+
+        # 浅层合并：顶层键直接覆盖；嵌套你可以按需细化
+        for k, v in patch.items():
+            meta[k] = v
+
+        # 原子写：写到临时文件再替换
+        d = os.path.dirname(path)
+        fd, tmp = tempfile.mkstemp(prefix="runjson_", dir=d)
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
 
     def compute_redundancy(self, n):
         r1 = n % self.world_size
@@ -315,24 +366,39 @@ class Trainer():
             **self.exp_config['optim_config']
         )
 
-        start_epoch = self.data_config.get('start_epoch', 0)
-        tensorboard_dir = 'tensorboard/{}'.format(self.exp_config['exp_dir'])
-        if start_epoch != 0:
-            ckpt = self.load_endpoint(self.data_config['start_epoch']-1)
+        # Decide tensorboard directory under current run
+        tensorboard_dir = os.path.join(self.run_dir, 'logs', 'tensorboard')
+
+        # Decide resume vs scratch based on --resume-from
+        if self.resume_from:
+            last_epoch = self._read_last_epoch_from_run()
+            if last_epoch is None:
+                raise FileNotFoundError(
+                    f"--resume-from given but {os.path.join(self.run_dir,'run.json')} lacks training_state.last_epoch"
+                )
+            # Load checkpoint from last_epoch and continue
+            ckpt = self.load_endpoint(last_epoch)
             self.global_step = self.load_ckpt(ckpt)
+            start_epoch = int(last_epoch) + 1
+            self.data_config['start_epoch'] = start_epoch
             if self.rank == 0:
                 self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train', purge_step=self.global_step)
                 self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv', purge_step=start_epoch)
+            self.recorder.info(f"Resume training from epoch: {start_epoch} (loaded last_epoch={last_epoch})")
         else:
+            # From scratch / finetune: start at 0
+            start_epoch = 0
+            self.data_config['start_epoch'] = 0
             self.global_step = 0
             if self.rank == 0:
                 self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train')
                 self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv')
+            self.recorder.info("Start training from scratch (or finetune) at epoch 0")
+
         self.scheduler = WarmUpLR(self.optim, warmup_steps=warm_up_peak_step)
         self.scheduler.set_step(self.global_step)
         if self.exp_config.get('finetune', False):
             finetune_config = self.exp_config.get('finetune')
-            #trained_ckpt = finetune_config['trained_ckpt']
             self.init_from_trained(**finetune_config)
 
         # init distributed training
@@ -463,11 +529,19 @@ class Trainer():
         )
         for loss_key, loss_value in cv_loss.items():
             self.tb_writer_cv.add_scalar('{}/{}'.format(loss_key, 'cv'), loss_value, self.epoch)
+        self._update_run_json_atomic({
+            "training_state": {
+                "last_epoch": self.epoch,
+                "global_step": self.global_step
+            }
+        })
 
     def load_endpoint(self, epoch):
-        exp_dir = self.exp_config['exp_dir']
+        # exp_dir = self.exp_config['exp_dir']
         exp_name = self.exp_config['exp_name']
-        ckpt = "{}/{}_{}.pt".format(exp_dir, exp_name, epoch)
+        run_dir = self.run_dir
+        ckpt = "{}/{}_{}.pt".format(run_dir, exp_name, epoch)
+        # ckpt = "{}/{}_{}.pt".format(exp_dir, exp_name, epoch)
         if os.path.isfile(ckpt):
             return ckpt
         else:
@@ -558,8 +632,11 @@ class Trainer():
 
         # train step
         if step <= 0:
-            self.backup_configs()
-            self.save_meta(cmd, cwd)
+            if not self.resume_from:
+                self.backup_configs()
+                self.save_meta(cmd, cwd)
+            else:
+                self.recorder.info(f"Resume from {self.resume_from}")
 
         if step <= 1:
             self.make_data_loader()
@@ -595,5 +672,6 @@ if __name__ == '__main__':
     #torch.multiprocessing.set_sharing_strategy('shared_memory')
     trainer = Trainer(
         model, config, world_size=args.world_size, rank=args.rank,
+        resume_from=args.resume_from
     )
     trainer.run(args.step, launch_cmd, cwd)

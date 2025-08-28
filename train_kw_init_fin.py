@@ -15,6 +15,7 @@ from data.loader.data_loader_kw_init_fin import Dataset
 from local.utils import WarmUpLR, read_list, Recorder
 from torch.utils.tensorboard import SummaryWriter
 import shutil
+import sys
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -79,6 +80,8 @@ class Trainer():
         random_seed=2022,
         #args: argparse.Namespace
     ):
+        import datetime
+        import re
         # init config info
         self.config_file = config_file
         self.data_config = config_file['data_config']
@@ -96,43 +99,139 @@ class Trainer():
         self.seed = random_seed
         self.device = torch.device('cuda')
         self.world_size = world_size
-        if (not os.path.isdir(self.exp_config['exp_dir'])) and (self.rank == 0):
+
+        if self.rank == 0:
+            # Build a unique run directory name
+            self.ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            slug = self.exp_config.get('run_slug', '') or os.environ.get('RUN_SLUG', '')
+            # sanitize slug: keep alphanum, dash, underscore only
+            if slug:
+                slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(slug)).strip("-")
+            self.run_dir_name = f"run_{self.ts}" + (f"_{slug}" if slug else "")
+            self.run_dir = os.path.join(self.exp_config['exp_dir'], self.run_dir_name)
             try:
-                os.makedirs(self.exp_config['exp_dir'])
-            except:
-                raise FileNotFoundError("can not create exp dir: {}".format(self.exp_config['exp_dir']))
+                os.makedirs(self.run_dir, exist_ok=False)
+            except FileExistsError:
+                # Extremely unlikely due to timestamp; fall back to a counter
+                i = 1
+                while True:
+                    alt = os.path.join(self.exp_config['exp_dir'], f"{self.run_dir_name}_{i}")
+                    try:
+                        os.makedirs(alt, exist_ok=False)
+                        self.run_dir = alt
+                        break
+                    except FileExistsError:
+                        i += 1
 
         # init recorder        
+        self.run_dir = getattr(self, 'run_dir', self.exp_config['exp_dir'])
         self.exp_config['log_config']['filename'] = "{}/train.{}.log".format(
-            self.exp_config['exp_dir'],
+            self.run_dir,
             self.rank
         )
-        self.recorder = Recorder(self.exp_config) 
+        self.recorder = Recorder(self.exp_config, self.run_dir) 
+
 
     def backup_configs(self):
         for k, v in self.config_file.items():
             self.recorder.info("{} config : {}".format(k.upper(), v))
         
-        if (self.rank == 0) and (self.data_config['start_epoch'] == 0): 
+        if (self.rank == 0): 
+            config_dir = os.path.join(self.run_dir, 'configs')
+            if not os.path.exists(config_dir):
+                os.makedirs(config_dir)
             # model config backup in expdir
-            mf = open("{}/model.yaml".format(self.exp_config['exp_dir']), 'w')
-            yaml.dump(self.model_config, mf)
+            self.model_config_file = os.path.join(config_dir, 'model.yaml')
+            yaml.dump(self.model_config, open(self.model_config_file, 'w'))
             # data config backup in expdir
-            df = open("{}/data.yaml".format(self.exp_config['exp_dir']), 'w')
-            yaml.dump(self.data_config, df)
+            self.data_config_file = os.path.join(config_dir, 'data.yaml')
+            yaml.dump(self.data_config, open(self.data_config_file, 'w'))
             # exp config backup in expdir
-            ef = open("{}/exp.yaml".format(self.exp_config['exp_dir']), 'w')
-            yaml.dump(self.exp_config, ef)
+            self.exp_config_file = os.path.join(config_dir, 'exp.yaml')
+            yaml.dump(self.exp_config, open(self.exp_config_file, 'w'))
             # data process code backup in expdir
-            data = "{}/data/".format(self.exp_config['exp_dir'])
-            if os.path.exists(data):
-                shutil.rmtree(data)
-            shutil.copytree("data", data, symlinks=True)
+            self.data_dir = os.path.join(self.run_dir, 'data')
+            if os.path.exists(self.data_dir):
+                shutil.rmtree(self.data_dir)
+            shutil.copytree("data", self.data_dir, symlinks=True)
             # model structure code backup in expdir
-            model = "{}/model/".format(self.exp_config['exp_dir'])
-            if os.path.exists(model):
-                shutil.rmtree(model)
-            shutil.copytree("model", model, symlinks=True)
+            self.model_dir = os.path.join(self.run_dir, 'model')
+            if os.path.exists(self.model_dir):
+                shutil.rmtree(self.model_dir)
+            shutil.copytree("model", self.model_dir, symlinks=True)
+    
+
+    def save_meta(self, cmd, cwd):
+        """
+        Create a unique run directory under exp_config['exp_dir'] on rank==0
+        and save training-related metadata before training starts.
+
+        Directory name format: run_{YYYYMMDD_HHMMSS}_{custom_slug}
+        - custom_slug is optional and taken from exp_config['run_slug'] if provided.
+
+        Files written:
+          - run.json : consolidated training-related info (configs, env, etc.)
+          - COMMIT_ID : current git commit id (if available)
+          - env.lock : environment lock produced by tools/env_lock.py
+        """
+        
+        if self.rank != 0:
+            return
+        import os, json, datetime, subprocess, sys, socket, traceback, re
+
+        # Try to get current git commit id
+        commit_id = "UNKNOWN"
+        commit_id_file = os.path.join(self.run_dir, "COMMIT_ID")
+        try:
+            commit_id = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.STDOUT).decode().strip()
+        except Exception:
+            pass
+        try:
+            with open(commit_id_file, "w") as f:
+                f.write(f"{commit_id}\n")
+        except Exception:
+            # Non-fatal
+            pass
+
+        # Produce env.lock by invoking tools/env_lock.py
+        from tools.env_lock import write_env_lock
+        env_dict = write_env_lock(self.run_dir)
+
+        # Consolidate run metadata
+        meta = {
+            "command": cmd,
+            "cwd": cwd,
+            "run_dir": self.run_dir,
+            "run_dir_name": self.run_dir_name,
+            "start_time": self.ts,
+            "commit_id": commit_id,
+            "rank": self.rank,
+            "world_size": self.world_size,
+            "device": str(self.device),
+            "random_seed": self.seed,
+            "hostname": socket.gethostname(),
+            "python_version": sys.version,
+            "torch_version": getattr(__import__('torch'), '__version__', 'unknown'),
+            "paths": {
+                "data_config": self.data_config_file,
+                "exp_config": self.exp_config_file,
+                "model_config": self.model_config_file,
+                "data_dir": self.data_dir,
+                "model_dir": self.model_dir,
+                "commit_id": commit_id_file
+            },
+            "config": self.config_file,
+        }
+
+        try:
+            with open(os.path.join(self.run_dir, "run.json"), "w") as f:
+                json.dump(meta, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+        # Expose the path for later use if needed
+        self.run_dir = self.run_dir
+
 
     def compute_redundancy(self, n):
         r1 = n % self.world_size
@@ -409,7 +508,7 @@ class Trainer():
         
     def train(self):
         torch.manual_seed(self.seed)
-        torch.cuda.manual_seed(args.seed)
+        torch.cuda.manual_seed(self.seed)
         self.model.to(self.device)
         self.model.train()
         start_epoch = self.data_config['start_epoch']
@@ -455,11 +554,12 @@ class Trainer():
                 self.record_step({'cv': cv_record_dict})
                 self.record_epoch(cv_record_dict)
         
-    def run(self, step):
+    def run(self, step, cmd, cwd):
 
         # train step
         if step <= 0:
             self.backup_configs()
+            self.save_meta(cmd, cwd)
 
         if step <= 1:
             self.make_data_loader()
@@ -475,6 +575,8 @@ class Trainer():
 
 if __name__ == '__main__':
     args = get_args()
+    launch_cmd = " ".join(sys.argv)
+    cwd = os.getcwd()
     #this line support load yaml config file recursively e.g.
     # config.yaml
     # item1: value1
@@ -494,4 +596,4 @@ if __name__ == '__main__':
     trainer = Trainer(
         model, config, world_size=args.world_size, rank=args.rank,
     )
-    trainer.run(args.step)
+    trainer.run(args.step, launch_cmd, cwd)

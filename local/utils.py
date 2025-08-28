@@ -329,7 +329,7 @@ class WarmUpLR(_LRScheduler):
 
 # recorder 
 class Recorder():
-    def __init__(self, log_config):
+    def __init__(self, log_config, run_dir):
 
         self.log = logging
         base_config = log_config['log_config']
@@ -343,6 +343,7 @@ class Recorder():
             "train": {},
             "cv": {}
         }
+        self.run_dir = run_dir
 
     def info(self, var):
         if not isinstance(var, str):
@@ -424,7 +425,7 @@ class Recorder():
                 plt.plot(plot_x, loss_curve)
                 plt.title("loss: {}".format(key))
                 plt.savefig(
-                    "{}/{}_{}.png".format(self.exp_dir, tag, key), 
+                    "{}/{}_{}.png".format(self.run_dir, tag, key), 
                     dpi=600
                 )
                 plt.close()
@@ -440,8 +441,8 @@ class Recorder():
                 'opt': opt,
                 'cv_loss': cv_loss
             },
-            "{exp_dir}/{exp_name}_{epoch}.pt".format(
-                exp_dir=self.exp_dir,
+            "{run_dir}/{exp_name}_{epoch}.pt".format(
+                run_dir=self.run_dir,
                 exp_name=self.exp_name,
                 epoch=epoch
             )

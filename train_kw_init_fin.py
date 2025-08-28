@@ -17,6 +17,7 @@ from torch.utils.tensorboard import SummaryWriter
 import shutil
 import sys
 import json, os, tempfile
+import re
 
 
 def get_args():
@@ -73,6 +74,12 @@ def get_args():
         default=None,
         help='Resume from an existing run_dir (contains run.json). If set, loader will restore from last_checkpoint and continue.'
     )
+    parser.add_argument(
+        '--start-time',
+        type=str,
+        default=None,
+        help='Specify the start time of each run, e.g. 20230601_101010.'
+    )
 
     args = parser.parse_args()
     return args
@@ -87,15 +94,9 @@ class Trainer():
         world_size: int,
         random_seed=2022,
         resume_from=None
-        #args: argparse.Namespace
     ):
-        import datetime
-        import re
         # init config info
         self.config_file = config_file
-        self.data_config = config_file['data_config']
-        self.exp_config = config_file['exp_config']
-
         self.rank = rank
         self.seed = random_seed
         self.device = torch.device('cuda')
@@ -106,23 +107,26 @@ class Trainer():
             run_dir = resume_from
             self.run_dir_name = os.path.basename(os.path.normpath(run_dir))
             self.run_dir = run_dir
-            config_file = '{}/configs/model.yaml'.format(run_dir)
-            model_config = yaml.load(open(config_file), Loader=yaml.FullLoader)
-            self.model_config = model_config
+            config_dir = os.path.join(run_dir, 'configs')
+            self.model_config = yaml.load(open(os.path.join(config_dir, 'model.yaml')), Loader=yaml.FullLoader)
+            self.data_config = yaml.load(open(os.path.join(config_dir, 'data.yaml')), Loader=yaml.FullLoader)
+            self.exp_config = yaml.load(open(os.path.join(config_dir, 'exp.yaml')), Loader=yaml.FullLoader)
         else:
             self.model_config = config_file['model_config']
+            self.data_config = config_file['data_config']
+            self.exp_config = config_file['exp_config']
+            # Build a unique run directory name
+            self.ts = args.start_time
+            slug = self.exp_config.get('run_slug', '') or os.environ.get('RUN_SLUG', '')
+            # sanitize slug: keep alphanum, dash, underscore only
+            if slug:
+                slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(slug)).strip("-")
+            self.run_dir_name = f"run_{self.ts}" + (f"_{slug}" if slug else "")
+            self.run_dir = os.path.join(self.exp_config['exp_dir'], self.run_dir_name)
         self.model = model_arch(**self.model_config)
 
         if not resume_from:
             if self.rank == 0:
-                # Build a unique run directory name
-                self.ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-                slug = self.exp_config.get('run_slug', '') or os.environ.get('RUN_SLUG', '')
-                # sanitize slug: keep alphanum, dash, underscore only
-                if slug:
-                    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(slug)).strip("-")
-                self.run_dir_name = f"run_{self.ts}" + (f"_{slug}" if slug else "")
-                self.run_dir = os.path.join(self.exp_config['exp_dir'], self.run_dir_name)
                 try:
                     os.makedirs(self.run_dir, exist_ok=False)
                 except FileExistsError:
@@ -137,12 +141,11 @@ class Trainer():
                         except FileExistsError:
                             i += 1
 
-        # init recorder        
-        self.run_dir = getattr(self, 'run_dir', self.exp_config['exp_dir'])
         self.exp_config['log_config']['filename'] = "{}/train.{}.log".format(
             self.run_dir,
             self.rank
         )
+        # init recorder        
         self.recorder = Recorder(self.exp_config, self.run_dir) 
 
     def _read_last_epoch_from_run(self):
@@ -200,7 +203,7 @@ class Trainer():
         
         if self.rank != 0:
             return
-        import os, json, datetime, subprocess, sys, socket, traceback, re
+        import os, json, subprocess, sys, socket
 
         # Try to get current git commit id
         commit_id = "UNKNOWN"

@@ -13,6 +13,7 @@ pwd=`pwd`
 
 GPU=(`echo $GPU | awk -F',' '{for(x=1;x<=NF;x++) printf($x" ")}'`)
 world_size=${#GPU[@]}
+start_time=`date +%Y%m%d_%H%M%S`
 
 if [ $stage -le 1 ];then
 if [ -z $resume_from ]; then
@@ -27,7 +28,8 @@ if [ -z $resume_from ]; then
              --gpu $gpu \
              --step $step \
              --seed $seed \
-             --port $port
+             --port $port \
+             --start-time $start_time
     } &
     sleep 5
     done
@@ -44,6 +46,7 @@ else
              --step $step \
              --seed $seed \
              --port $port \
+             --start-time $start_time \
              --resume-from $resume_from
     } &
     sleep 5

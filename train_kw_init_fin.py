@@ -15,6 +15,10 @@ from data.loader.data_loader_kw_init_fin import Dataset
 from local.utils import WarmUpLR, read_list, Recorder
 from torch.utils.tensorboard import SummaryWriter
 import shutil
+import sys
+import json, os, tempfile
+import re
+
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -64,6 +68,18 @@ def get_args():
         default='exp/',
         help="experinments root dir"
     )
+    parser.add_argument(
+        '--resume-from',
+        type=str,
+        default=None,
+        help='Resume from an existing run_dir (contains run.json). If set, loader will restore from last_checkpoint and continue.'
+    )
+    parser.add_argument(
+        '--start-time',
+        type=str,
+        default=None,
+        help='Specify the start time of each run, e.g. 20230601_101010.'
+    )
 
     args = parser.parse_args()
     return args
@@ -77,62 +93,199 @@ class Trainer():
         rank: int,
         world_size: int,
         random_seed=2022,
-        #args: argparse.Namespace
+        resume_from=None
     ):
         # init config info
         self.config_file = config_file
-        self.data_config = config_file['data_config']
-        self.exp_config = config_file['exp_config']
-
-        # continue training from break point
-        if self.data_config['start_epoch'] != 0:
-            config_file = '{}/model.yaml'.format(self.exp_config['exp_dir'])
-            model_config = yaml.load(open(config_file), Loader=yaml.FullLoader)
-            self.model_config = model_config
-        else:
-            self.model_config = config_file['model_config']
-        self.model = model_arch(**self.model_config)
         self.rank = rank
         self.seed = random_seed
         self.device = torch.device('cuda')
         self.world_size = world_size
-        if (not os.path.isdir(self.exp_config['exp_dir'])) and (self.rank == 0):
-            try:
-                os.makedirs(self.exp_config['exp_dir'])
-            except:
-                raise FileNotFoundError("can not create exp dir: {}".format(self.exp_config['exp_dir']))
+        self.resume_from = resume_from
+        # continue training from break point
+        if resume_from:
+            run_dir = resume_from
+            self.run_dir_name = os.path.basename(os.path.normpath(run_dir))
+            self.run_dir = run_dir
+            config_dir = os.path.join(run_dir, 'configs')
+            self.model_config = yaml.load(open(os.path.join(config_dir, 'model.yaml')), Loader=yaml.FullLoader)
+            self.data_config = yaml.load(open(os.path.join(config_dir, 'data.yaml')), Loader=yaml.FullLoader)
+            self.exp_config = yaml.load(open(os.path.join(config_dir, 'exp.yaml')), Loader=yaml.FullLoader)
+        else:
+            self.model_config = config_file['model_config']
+            self.data_config = config_file['data_config']
+            self.exp_config = config_file['exp_config']
+            # Build a unique run directory name
+            self.ts = args.start_time
+            slug = self.exp_config.get('run_slug', '') or os.environ.get('RUN_SLUG', '')
+            # sanitize slug: keep alphanum, dash, underscore only
+            if slug:
+                slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(slug)).strip("-")
+            self.run_dir_name = f"run_{self.ts}" + (f"_{slug}" if slug else "")
+            self.run_dir = os.path.join(self.exp_config['exp_dir'], self.run_dir_name)
+        self.model = model_arch(**self.model_config)
 
-        # init recorder        
+        if not resume_from:
+            if self.rank == 0:
+                try:
+                    os.makedirs(self.run_dir, exist_ok=False)
+                except FileExistsError:
+                    # Extremely unlikely due to timestamp; fall back to a counter
+                    i = 1
+                    while True:
+                        alt = os.path.join(self.exp_config['exp_dir'], f"{self.run_dir_name}_{i}")
+                        try:
+                            os.makedirs(alt, exist_ok=False)
+                            self.run_dir = alt
+                            break
+                        except FileExistsError:
+                            i += 1
+
         self.exp_config['log_config']['filename'] = "{}/train.{}.log".format(
-            self.exp_config['exp_dir'],
+            self.run_dir,
             self.rank
         )
-        self.recorder = Recorder(self.exp_config) 
+        # init recorder        
+        self.recorder = Recorder(self.exp_config, self.run_dir) 
+
+    def _read_last_epoch_from_run(self):
+        try:
+            path = os.path.join(self.run_dir, 'run.json')
+            with open(path, 'r') as f:
+                meta = json.load(f)
+            return meta.get('training_state', {}).get('last_epoch', None)
+        except Exception:
+            return None
+
 
     def backup_configs(self):
         for k, v in self.config_file.items():
             self.recorder.info("{} config : {}".format(k.upper(), v))
         
-        if (self.rank == 0) and (self.data_config['start_epoch'] == 0): 
+        if (self.rank == 0): 
+            config_dir = os.path.join(self.run_dir, 'configs')
+            if not os.path.exists(config_dir):
+                os.makedirs(config_dir)
             # model config backup in expdir
-            mf = open("{}/model.yaml".format(self.exp_config['exp_dir']), 'w')
-            yaml.dump(self.model_config, mf)
+            self.model_config_file = os.path.join(config_dir, 'model.yaml')
+            yaml.dump(self.model_config, open(self.model_config_file, 'w'))
             # data config backup in expdir
-            df = open("{}/data.yaml".format(self.exp_config['exp_dir']), 'w')
-            yaml.dump(self.data_config, df)
+            self.data_config_file = os.path.join(config_dir, 'data.yaml')
+            yaml.dump(self.data_config, open(self.data_config_file, 'w'))
             # exp config backup in expdir
-            ef = open("{}/exp.yaml".format(self.exp_config['exp_dir']), 'w')
-            yaml.dump(self.exp_config, ef)
+            self.exp_config_file = os.path.join(config_dir, 'exp.yaml')
+            yaml.dump(self.exp_config, open(self.exp_config_file, 'w'))
             # data process code backup in expdir
-            data = "{}/data/".format(self.exp_config['exp_dir'])
-            if os.path.exists(data):
-                shutil.rmtree(data)
-            shutil.copytree("data", data, symlinks=True)
+            self.data_dir = os.path.join(self.run_dir, 'data')
+            if os.path.exists(self.data_dir):
+                shutil.rmtree(self.data_dir)
+            shutil.copytree("data", self.data_dir, symlinks=True)
             # model structure code backup in expdir
-            model = "{}/model/".format(self.exp_config['exp_dir'])
-            if os.path.exists(model):
-                shutil.rmtree(model)
-            shutil.copytree("model", model, symlinks=True)
+            self.model_dir = os.path.join(self.run_dir, 'model')
+            if os.path.exists(self.model_dir):
+                shutil.rmtree(self.model_dir)
+            shutil.copytree("model", self.model_dir, symlinks=True)
+    
+
+    def save_meta(self, cmd, cwd):
+        """
+        Create a unique run directory under exp_config['exp_dir'] on rank==0
+        and save training-related metadata before training starts.
+
+        Directory name format: run_{YYYYMMDD_HHMMSS}_{custom_slug}
+        - custom_slug is optional and taken from exp_config['run_slug'] if provided.
+
+        Files written:
+          - run.json : consolidated training-related info (configs, env, etc.)
+          - COMMIT_ID : current git commit id (if available)
+          - env.lock : environment lock produced by tools/env_lock.py
+        """
+        
+        if self.rank != 0:
+            return
+        import os, json, subprocess, sys, socket
+
+        # Try to get current git commit id
+        commit_id = "UNKNOWN"
+        commit_id_file = os.path.join(self.run_dir, "COMMIT_ID")
+        try:
+            commit_id = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.STDOUT).decode().strip()
+        except Exception:
+            pass
+        try:
+            with open(commit_id_file, "w") as f:
+                f.write(f"{commit_id}\n")
+        except Exception:
+            # Non-fatal
+            pass
+
+        # Produce env.lock by invoking tools/env_lock.py
+        from tools.env_lock import write_env_lock
+        env_dict = write_env_lock(self.run_dir)
+
+        # Consolidate run metadata
+        meta = {
+            "command": cmd,
+            "cwd": cwd,
+            "run_dir": self.run_dir,
+            "run_dir_name": self.run_dir_name,
+            "start_time": self.ts,
+            "commit_id": commit_id,
+            "rank": self.rank,
+            "world_size": self.world_size,
+            "device": str(self.device),
+            "random_seed": self.seed,
+            "hostname": socket.gethostname(),
+            "python_version": sys.version,
+            "torch_version": getattr(__import__('torch'), '__version__', 'unknown'),
+            "paths": {
+                "data_config": self.data_config_file,
+                "exp_config": self.exp_config_file,
+                "model_config": self.model_config_file,
+                "data_dir": self.data_dir,
+                "model_dir": self.model_dir,
+                "commit_id": commit_id_file
+            },
+            "config": self.config_file,
+        }
+
+        try:
+            with open(os.path.join(self.run_dir, "run.json"), "w") as f:
+                json.dump(meta, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+        # Expose the path for later use if needed
+        self.run_dir = self.run_dir
+
+    # import json, os, tempfile
+
+    def _update_run_json_atomic(self, patch: dict):
+        if self.rank != 0:
+            return
+        path = os.path.join(self.run_dir, "run.json")
+        try:
+            with open(path, "r") as f:
+                meta = json.load(f)
+        except Exception:
+            meta = {}
+
+        # 浅层合并：顶层键直接覆盖；嵌套你可以按需细化
+        for k, v in patch.items():
+            meta[k] = v
+
+        # 原子写：写到临时文件再替换
+        d = os.path.dirname(path)
+        fd, tmp = tempfile.mkstemp(prefix="runjson_", dir=d)
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
 
     def compute_redundancy(self, n):
         r1 = n % self.world_size
@@ -216,24 +369,39 @@ class Trainer():
             **self.exp_config['optim_config']
         )
 
-        start_epoch = self.data_config.get('start_epoch', 0)
-        tensorboard_dir = 'tensorboard/{}'.format(self.exp_config['exp_dir'])
-        if start_epoch != 0:
-            ckpt = self.load_endpoint(self.data_config['start_epoch']-1)
+        # Decide tensorboard directory under current run
+        tensorboard_dir = os.path.join(self.run_dir, 'logs', 'tensorboard')
+
+        # Decide resume vs scratch based on --resume-from
+        if self.resume_from:
+            last_epoch = self._read_last_epoch_from_run()
+            if last_epoch is None:
+                raise FileNotFoundError(
+                    f"--resume-from given but {os.path.join(self.run_dir,'run.json')} lacks training_state.last_epoch"
+                )
+            # Load checkpoint from last_epoch and continue
+            ckpt = self.load_endpoint(last_epoch)
             self.global_step = self.load_ckpt(ckpt)
+            start_epoch = int(last_epoch) + 1
+            self.data_config['start_epoch'] = start_epoch
             if self.rank == 0:
                 self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train', purge_step=self.global_step)
                 self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv', purge_step=start_epoch)
+            self.recorder.info(f"Resume training from epoch: {start_epoch} (loaded last_epoch={last_epoch})")
         else:
+            # From scratch / finetune: start at 0
+            start_epoch = 0
+            self.data_config['start_epoch'] = 0
             self.global_step = 0
             if self.rank == 0:
                 self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train')
                 self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv')
+            self.recorder.info("Start training from scratch (or finetune) at epoch 0")
+
         self.scheduler = WarmUpLR(self.optim, warmup_steps=warm_up_peak_step)
         self.scheduler.set_step(self.global_step)
         if self.exp_config.get('finetune', False):
             finetune_config = self.exp_config.get('finetune')
-            #trained_ckpt = finetune_config['trained_ckpt']
             self.init_from_trained(**finetune_config)
 
         # init distributed training
@@ -364,11 +532,19 @@ class Trainer():
         )
         for loss_key, loss_value in cv_loss.items():
             self.tb_writer_cv.add_scalar('{}/{}'.format(loss_key, 'cv'), loss_value, self.epoch)
+        self._update_run_json_atomic({
+            "training_state": {
+                "last_epoch": self.epoch,
+                "global_step": self.global_step
+            }
+        })
 
     def load_endpoint(self, epoch):
-        exp_dir = self.exp_config['exp_dir']
+        # exp_dir = self.exp_config['exp_dir']
         exp_name = self.exp_config['exp_name']
-        ckpt = "{}/{}_{}.pt".format(exp_dir, exp_name, epoch)
+        run_dir = self.run_dir
+        ckpt = "{}/{}_{}.pt".format(run_dir, exp_name, epoch)
+        # ckpt = "{}/{}_{}.pt".format(exp_dir, exp_name, epoch)
         if os.path.isfile(ckpt):
             return ckpt
         else:
@@ -409,7 +585,7 @@ class Trainer():
         
     def train(self):
         torch.manual_seed(self.seed)
-        torch.cuda.manual_seed(args.seed)
+        torch.cuda.manual_seed(self.seed)
         self.model.to(self.device)
         self.model.train()
         start_epoch = self.data_config['start_epoch']
@@ -455,11 +631,15 @@ class Trainer():
                 self.record_step({'cv': cv_record_dict})
                 self.record_epoch(cv_record_dict)
         
-    def run(self, step):
+    def run(self, step, cmd, cwd):
 
         # train step
         if step <= 0:
-            self.backup_configs()
+            if not self.resume_from:
+                self.backup_configs()
+                self.save_meta(cmd, cwd)
+            else:
+                self.recorder.info(f"Resume from {self.resume_from}")
 
         if step <= 1:
             self.make_data_loader()
@@ -475,6 +655,8 @@ class Trainer():
 
 if __name__ == '__main__':
     args = get_args()
+    launch_cmd = " ".join(sys.argv)
+    cwd = os.getcwd()
     #this line support load yaml config file recursively e.g.
     # config.yaml
     # item1: value1
@@ -493,5 +675,6 @@ if __name__ == '__main__':
     #torch.multiprocessing.set_sharing_strategy('shared_memory')
     trainer = Trainer(
         model, config, world_size=args.world_size, rank=args.rank,
+        resume_from=args.resume_from
     )
-    trainer.run(args.step)
+    trainer.run(args.step, launch_cmd, cwd)

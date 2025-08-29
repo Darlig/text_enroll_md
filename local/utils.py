@@ -332,7 +332,7 @@ class Recorder():
     def __init__(self, log_config, run_dir):
 
         self.log = logging
-        base_config = log_config['log_config']
+        base_config = log_config['log_config'].copy()
         l_level = base_config['level']
         base_config['level'] = log_level[l_level]
         self.log.basicConfig(**base_config)

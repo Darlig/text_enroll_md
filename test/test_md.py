@@ -71,6 +71,11 @@ def insert_special_token(phone_seq, target_level, special_token):
         kw_spec_mask.insert(0, 1)
     return phone_seq, kw_spec_mask
 
+def result_extract(det_result, target_level):
+    if 'word' in target_level:
+        det_result = det_result[1:]
+    return det_result
+
 def inference(model, wav_path, phones_int, target_level, special_token):
     with torch.no_grad():
         # Load wav file
@@ -94,8 +99,10 @@ def inference(model, wav_path, phones_int, target_level, special_token):
         input = (fbank, fbank_len, phones_int, phones_len, kw_spec_mask)
         input_data = (d.to('cuda:0') for d in input)
         det_result, hyp_result = model.evaluate(input_data)
-        det_result = det_result.cpu().numpy()[0]
+        det_result = det_result[0]
         hyp_result = hyp_result.cpu().numpy()[0]
+        det_result = result_extract(det_result, target_level)
+        det_result = det_result.cpu().numpy()
         return det_result, hyp_result
 
 def test_md(model, wav_scp_path, phone_path, human_label_path, result_label_score_path, target_level, special_token):

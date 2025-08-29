@@ -140,6 +140,10 @@ class Trainer():
                             break
                         except FileExistsError:
                             i += 1
+            # wait for rank 0 to create dir
+            else:
+                while not os.path.exists(self.run_dir):
+                    pass
 
         self.exp_config['log_config']['filename'] = "{}/train.{}.log".format(
             self.run_dir,
@@ -393,6 +397,11 @@ class Trainer():
             start_epoch = 0
             self.data_config['start_epoch'] = 0
             self.global_step = 0
+            if self.exp_config.get('finetune_config', False):
+                self.recorder.info("Finetune from existing checkpoint {}".format(
+                    self.exp_config['finetune_config']['trained_ckpt']
+                ))
+                self.load_ckpt_part(self.exp_config['finetune_config']['trained_ckpt'])
             if self.rank == 0:
                 self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train')
                 self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv')
@@ -400,9 +409,9 @@ class Trainer():
 
         self.scheduler = WarmUpLR(self.optim, warmup_steps=warm_up_peak_step)
         self.scheduler.set_step(self.global_step)
-        if self.exp_config.get('finetune', False):
-            finetune_config = self.exp_config.get('finetune')
-            self.init_from_trained(**finetune_config)
+        # if self.exp_config.get('finetune', False):
+        #     finetune_config = self.exp_config.get('finetune')
+        #     self.init_from_trained(**finetune_config)
 
         # init distributed training
         if self.world_size > 1:
@@ -469,7 +478,26 @@ class Trainer():
                     state[k] = v.to(self.device)
         self.model.load_state_dict(model)
         return step
-    
+
+    def need_to_load(self, key, pretrained_module_prefix):
+        for module_prefix in pretrained_module_prefix:
+            if key.startswith(module_prefix):
+                return True
+        #if key.startswith('au_'):
+        #    return True
+        #if key.startswith('det_net'):
+        #    return True
+        return False
+
+    def load_ckpt_part(self, ckpt):
+        ckpt_dict = torch.load(ckpt, map_location='cpu')
+        model_dict = self.model.state_dict()
+        pretrained_dict = ckpt_dict['model']
+        pretrained_module_prefix = self.exp_config['finetune_config']['pretrained_module_prefix']
+        filtered_dict = {k: v for k, v in pretrained_dict.items() if self.need_to_load(k, pretrained_module_prefix)}
+        model_dict.update(filtered_dict)
+        self.model.load_state_dict(model_dict)
+
     @torch.no_grad()
     def cross_valid(self):
         cv_model = copy.deepcopy(self.model)
@@ -561,7 +589,7 @@ class Trainer():
         valid_ckpt = {k:0 for k in range(min_epoch, max_epoch)}
         valid_loss = []
         for e in range(min_epoch, max_epoch):
-            ckpt = "{}/{}_{}.pt".format(self.exp_config['exp_dir'], self.exp_config['exp_name'],e)
+            ckpt = "{}/{}_{}.pt".format(self.run_dir, self.exp_config['exp_name'],e)
             ckpt = torch.load(ckpt, map_location='cpu')
             one_valid_loss = ckpt['cv_loss']['total_loss'].item()
             valid_ckpt[e] = ckpt['model']

@@ -111,6 +111,32 @@ class Trainer():
             self.model_config = yaml.load(open(os.path.join(config_dir, 'model.yaml')), Loader=yaml.FullLoader)
             self.data_config = yaml.load(open(os.path.join(config_dir, 'data.yaml')), Loader=yaml.FullLoader)
             self.exp_config = yaml.load(open(os.path.join(config_dir, 'exp.yaml')), Loader=yaml.FullLoader)
+            # --- support extending epochs on resume via the current config file ---
+            # If the provided config (this run's --config) contains data_config.epoch
+            # and it is GREATER than the saved one, use the larger (extend only).
+            self._epoch_override_requested = None
+            try:
+                override_epoch = int(config_file.get('data_config', {}).get('epoch', None))
+            except Exception:
+                override_epoch = None
+            if override_epoch is not None:
+                prev_epoch = int(self.data_config.get('epoch', 0))
+                if override_epoch > prev_epoch:
+                    # apply extension
+                    self.data_config['epoch'] = override_epoch
+                    self._epoch_override_requested = {
+                        "previous": prev_epoch,
+                        "requested": override_epoch,
+                        "applied": override_epoch
+                    }
+                else:
+                    # do not shrink; keep previous
+                    self._epoch_override_requested = {
+                        "previous": prev_epoch,
+                        "requested": override_epoch,
+                        "applied": prev_epoch
+                    }
+            # --- end: epoch extension support ---
         else:
             self.model_config = config_file['model_config']
             self.data_config = config_file['data_config']
@@ -392,6 +418,15 @@ class Trainer():
                 self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train', purge_step=self.global_step)
                 self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv', purge_step=start_epoch)
             self.recorder.info(f"Resume training from epoch: {start_epoch} (loaded last_epoch={last_epoch})")
+            # record any epoch override coming from the current config
+            if getattr(self, "_epoch_override_requested", None) is not None and self.rank == 0:
+                ov = self._epoch_override_requested
+                self.recorder.info(f"[resume] total epochs: saved={ov['previous']}, requested={ov['requested']}, effective={self.data_config['epoch']}")
+                self._update_run_json_atomic({
+                    "resume_overrides": {
+                        "epoch": ov
+                    }
+                })
         else:
             # From scratch / finetune: start at 0
             start_epoch = 0
@@ -622,6 +657,9 @@ class Trainer():
                 self.exp_config['log_config']['filename']
             )
         )
+        if start_epoch >= end_epoch:
+            self.recorder.info(f"No training to run: start_epoch {start_epoch} >= end_epoch {end_epoch}.")
+            return
         #TODO: add model.join context for distributed data parallel
         for epoch in range(start_epoch, end_epoch):
             torch.cuda.empty_cache()

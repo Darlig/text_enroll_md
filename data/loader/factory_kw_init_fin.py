@@ -445,7 +445,7 @@ def process_sampled_keyword_from_label(
 # Process: sample keyword from continues label
 def process_sampled_keyword_from_label_md(
         data: Iterator[Dict], positive_prob: float=0.5, neg_len: int = None, target_level: list=[], special_token: Dict = {}, aux_lexicon: Dict = {}, 
-        sample_func_choice: Dict=None, neg_sample_func_choice: Dict=None, min_keyword_len: int=2, max_keyword_len: int=6
+        sample_func_choice: Dict=None, neg_sample_func_choice: Dict=None
 ):
     # TEXT_SPEC_TOKEN = {'sos','eos','sok', 'eok', 'unk'}
     # sos: start of setence, eos: end of setence, sok: start of keyword, eok, end of keyword, unk: unknow token
@@ -460,8 +460,8 @@ def process_sampled_keyword_from_label_md(
         kw, kw_pos, kw_length, pos, target = utils.make_keyword_md(
             candidate_seq=new_phn_label, segment_seq=new_segment_label,
             positive_prob=positive_prob, num_pre_sample=num_pre_sample, kw_position_candidate=sample['kw_candidate'],
-            corrupt_label=corrupt_label, min_keyword_len=min_keyword_len, max_keyword_len=max_keyword_len, aux_lexicon=aux_lexicon,
-            sample_func_choice=sample_func_choice, neg_sample_func_choice=neg_sample_func_choice, max_sub_ratio=0.5, target_level=target_level
+            corrupt_label=corrupt_label, aux_lexicon=aux_lexicon,
+            sample_func_choice=sample_func_choice, neg_sample_func_choice=neg_sample_func_choice, target_level=target_level
         )
         # if len(kw) != len(target):
         #     print("process_sampled_keyword_from_label_md() -> ======== keyword: {}, target: {}".format(kw, target))

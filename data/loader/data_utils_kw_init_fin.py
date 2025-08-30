@@ -7,6 +7,7 @@ import torchaudio
 import json
 import copy
 import itertools
+import inspect
 
 import numpy as np
 
@@ -309,8 +310,8 @@ MD_NEG_SAMPLING_FUNCTIONS = {
     'substitution_neg_md': substitution_neg_md,          # existing function
 }
 
-# Generic roulette-wheel picker: {'choices':[{'name', 'prob'}, ...]} -> selected name
-def _pick_name_from_choices(spec: Dict) -> Optional[str]:
+# Return the full chosen choice dict (e.g., {'name': 'xxx', 'prob': 0.7, 'params': {...}})
+def _pick_choice_from_choices(spec: Dict) -> Optional[Dict]:
     try:
         if not spec:
             return None
@@ -326,10 +327,21 @@ def _pick_name_from_choices(spec: Dict) -> Optional[str]:
         for c, p in zip(choices, probs):
             acc += p / total
             if r <= acc:
-                return c.get('name')
-        return choices[-1].get('name')
+                return c
+        return choices[-1]
     except Exception:
         return None
+
+# Filter a params dict by a callable's signature (only pass accepted kwargs)
+def _filter_kwargs_by_signature(fn, params: Dict) -> Dict:
+    if not isinstance(params, dict) or not params:
+        return {}
+    try:
+        sig = inspect.signature(fn)
+        return {k: v for k, v in params.items() if k in sig.parameters}
+    except Exception:
+        return {}
+
 # --- end YAML-driven pickers ---
 
 # save wav as PCM_S 16bit 16k: always use to test code
@@ -853,21 +865,25 @@ def snipe_edge(waveform: torch.Tensor, hop_length: int=160):
     edges = num_samples % hop_length
     return waveform[:,0:num_samples-edges]
 
-def sample_keyword(candidate_seq: List[Any], segment_seq: List[Any], kw_position_candidate: List=None, min_keyword_len: int=2, max_keyword_len: int=6,
+def sample_keyword(candidate_seq: List[Any], segment_seq: List[Any], kw_position_candidate: List=None,
                     sample_func_choice: Dict=None) -> Tuple[List, int]:
-    # Prefer YAML-driven choice if provided; otherwise fall back to argument sample_func
-    chosen = _pick_name_from_choices(sample_func_choice)
-    chosen_fn = MD_SAMPLING_FUNCTIONS.get(chosen, sample_kw_from_label)
-    return chosen_fn(candidate_seq, segment_seq, kw_position_candidate, min_keyword_len, max_keyword_len)
+    # Pick a function via YAML choices (with optional per-function params)
+    choice = _pick_choice_from_choices(sample_func_choice)
+    func_name = choice.get('name') if choice else None
+    func_params = choice.get('params', {}) if choice else {}
+    fn = MD_SAMPLING_FUNCTIONS.get(func_name, sample_kw_from_label)
+    func_kwargs = _filter_kwargs_by_signature(fn, func_params)
+
+    return fn(candidate_seq, segment_seq, kw_position_candidate, **func_kwargs)
 
 def make_keyword_md(
         candidate_seq: List[Any], segment_seq: List[Any],
         positive_prob: float, num_pre_sample: Optional[int]=None, kw_position_candidate: List=None,
-        corrupt_label: List=None, min_keyword_len: int=2, max_keyword_len: int=6, aux_lexicon: Dict=None, 
-        sample_func_choice: Dict=None, neg_sample_func_choice: Dict=None, max_sub_ratio: float=0.5, target_level: List=None
+        corrupt_label: List=None, aux_lexicon: Dict=None, 
+        sample_func_choice: Dict=None, neg_sample_func_choice: Dict=None, target_level: List=None
     ) -> Tuple[List, int, int, bool, List]:
 
-    keyword, keyword_pos = sample_keyword(candidate_seq, segment_seq, kw_position_candidate, min_keyword_len, max_keyword_len, sample_func_choice)
+    keyword, keyword_pos = sample_keyword(candidate_seq, segment_seq, kw_position_candidate, sample_func_choice)
     # keyword_unfold = unfold_list(keyword)
     pos = True
     # target = torch.tensor([1]*len(keyword_unfold))
@@ -877,9 +893,12 @@ def make_keyword_md(
     if dice > positive_prob: # negtivae sample
         target = []
         # choose MD negative function via YAML config; default to substitution_by_lex
-        md_neg_name = _pick_name_from_choices(neg_sample_func_choice)
-        md_neg_fn = MD_NEG_SAMPLING_FUNCTIONS.get(md_neg_name, substitution_neg_by_lex)
-        keyword, phone_target = md_neg_fn(keyword, aux_lexicon)
+        neg_choice = _pick_choice_from_choices(neg_sample_func_choice)
+        neg_func_name = neg_choice.get('name') if neg_choice else None
+        neg_func_params = neg_choice.get('params', {}) if neg_choice else {}
+        md_neg_fn = MD_NEG_SAMPLING_FUNCTIONS.get(neg_func_name, substitution_neg_by_lex)
+        neg_func_kwargs = _filter_kwargs_by_signature(md_neg_fn, neg_func_params)
+        keyword, phone_target = md_neg_fn(keyword, aux_lexicon, **neg_func_kwargs)
         if 'phone' in target_level:
             target.extend(phone_target)
         if 'word' in target_level:

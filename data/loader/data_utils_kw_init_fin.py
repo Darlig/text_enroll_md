@@ -70,6 +70,22 @@ def tensor2str(t: torch.Tensor):
     t = list(map(lambda x: str(x), t))
     return t
 
+# sample positive keyword from asr label
+def sample_kw_from_label(label: List, segment: List, kw_candidate: List=None, min_keyword_len: int=2, max_keyword_len: int=6)->Tuple[List, int]:
+    #match_len = 0
+    #while match_len == 0:
+    #segment = set_length_range(segment, min_keyword_len, max_keyword_len)
+    seg_len = len(segment)
+    seg_pos = random.randint(0, seg_len-1)
+    kw = segment[seg_pos]
+    kw_len = len(kw)
+    if kw_len >= min_keyword_len and kw_len <= max_keyword_len:
+        match_len = 1
+    kw_pos = 0
+    for i in range(seg_pos):
+        kw_pos += len(segment[i])
+    return (kw, kw_pos)
+
 def substitution_neg(positive_keyword: List[int], aux_lexicon: Dict, negative_keyword: List[int]) -> List[int]:
     #print("substitution_neg")
     n_sub = 1
@@ -276,6 +292,45 @@ def full_neg(positive_keyword: List[int], aux_lexicon: Dict, negative_keyword: L
 
 NEG_FAMILY = {0: substitution_neg, 1: deletion_neg, 2: insertion_neg, 3: shuffle_neg, 4: full_neg}
 
+# --- YAML-driven pickers for initial keyword sampling and MD negative sampling ---
+
+# 1) Initial keyword sampler (for sample_keyword)
+
+# Map method names to functions
+MD_SAMPLING_FUNCTIONS = {
+    'sample_kw_from_label': sample_kw_from_label
+}
+
+# 2) MD negative sampling (for make_keyword_md's negative branch)
+
+# Map method names to functions (both must return (keyword, phone_target))
+MD_NEG_SAMPLING_FUNCTIONS = {
+    'substitution_neg_by_lex': substitution_neg_by_lex,  # existing function
+    'substitution_neg_md': substitution_neg_md,          # existing function
+}
+
+# Generic roulette-wheel picker: {'choices':[{'name', 'prob'}, ...]} -> selected name
+def _pick_name_from_choices(spec: Dict) -> Optional[str]:
+    try:
+        if not spec:
+            return None
+        choices = spec.get('choices', [])
+        if not choices:
+            return None
+        probs = [float(c.get('prob', 1.0)) for c in choices]
+        total = sum(probs)
+        if total <= 0:
+            return None
+        r = random.random()
+        acc = 0.0
+        for c, p in zip(choices, probs):
+            acc += p / total
+            if r <= acc:
+                return c.get('name')
+        return choices[-1].get('name')
+    except Exception:
+        return None
+# --- end YAML-driven pickers ---
 
 # save wav as PCM_S 16bit 16k: always use to test code
 def save_wav(wav: torch.Tensor, names: str):
@@ -798,23 +853,21 @@ def snipe_edge(waveform: torch.Tensor, hop_length: int=160):
     edges = num_samples % hop_length
     return waveform[:,0:num_samples-edges]
 
-def sample_keyword(candidate_seq: List[Any], segment_seq: List[Any], kw_position_candidate: List=None, min_keyword_len: int=2, max_keyword_len: int=6, sample_func: str='sample_kw_from_label') -> Tuple[List, int]:
-    sample_functions = {
-        'sample_kw_from_label': sample_kw_from_label
-    }
-    if sample_func in sample_functions:
-        return sample_functions[sample_func](candidate_seq, segment_seq, kw_position_candidate, min_keyword_len, max_keyword_len)
-    else:
-        raise NotImplementedError("Invalid sample function: {}".format(sample_func))
+def sample_keyword(candidate_seq: List[Any], segment_seq: List[Any], kw_position_candidate: List=None, min_keyword_len: int=2, max_keyword_len: int=6,
+                    sample_func_choice: Dict=None) -> Tuple[List, int]:
+    # Prefer YAML-driven choice if provided; otherwise fall back to argument sample_func
+    chosen = _pick_name_from_choices(sample_func_choice)
+    chosen_fn = MD_SAMPLING_FUNCTIONS.get(chosen, sample_kw_from_label)
+    return chosen_fn(candidate_seq, segment_seq, kw_position_candidate, min_keyword_len, max_keyword_len)
 
 def make_keyword_md(
         candidate_seq: List[Any], segment_seq: List[Any],
         positive_prob: float, num_pre_sample: Optional[int]=None, kw_position_candidate: List=None,
         corrupt_label: List=None, min_keyword_len: int=2, max_keyword_len: int=6, aux_lexicon: Dict=None, 
-        sample_func: str='sample_kw_from_label', max_sub_ratio: float=0.5, target_level: List=None
+        sample_func_choice: Dict=None, neg_sample_func_choice: Dict=None, max_sub_ratio: float=0.5, target_level: List=None
     ) -> Tuple[List, int, int, bool, List]:
 
-    keyword, keyword_pos = sample_keyword(candidate_seq, segment_seq, kw_position_candidate, min_keyword_len, max_keyword_len, sample_func)
+    keyword, keyword_pos = sample_keyword(candidate_seq, segment_seq, kw_position_candidate, min_keyword_len, max_keyword_len, sample_func_choice)
     # keyword_unfold = unfold_list(keyword)
     pos = True
     # target = torch.tensor([1]*len(keyword_unfold))
@@ -823,8 +876,10 @@ def make_keyword_md(
     dice = random.uniform(0,1)
     if dice > positive_prob: # negtivae sample
         target = []
-        # keyword, target = substitution_neg_md(keyword, aux_lexicon, max_sub_ratio)
-        keyword, phone_target = substitution_neg_by_lex(keyword, aux_lexicon)
+        # choose MD negative function via YAML config; default to substitution_by_lex
+        md_neg_name = _pick_name_from_choices(neg_sample_func_choice)
+        md_neg_fn = MD_NEG_SAMPLING_FUNCTIONS.get(md_neg_name, substitution_neg_by_lex)
+        keyword, phone_target = md_neg_fn(keyword, aux_lexicon)
         if 'phone' in target_level:
             target.extend(phone_target)
         if 'word' in target_level:
@@ -905,22 +960,6 @@ def make_keyword_dump(sample, positive_prob, neg_len=None):
         pos = True
         target = torch.tensor([1])
     return kw, kw_pos, len(kw), pos, target
-
-# sample positive keyword from asr label
-def sample_kw_from_label(label: List, segment: List, kw_candidate: List=None, min_keyword_len: int=2, max_keyword_len: int=6)->Tuple[List, int]:
-    #match_len = 0
-    #while match_len == 0:
-    #segment = set_length_range(segment, min_keyword_len, max_keyword_len)
-    seg_len = len(segment)
-    seg_pos = random.randint(0, seg_len-1)
-    kw = segment[seg_pos]
-    kw_len = len(kw)
-    if kw_len >= min_keyword_len and kw_len <= max_keyword_len:
-        match_len = 1
-    kw_pos = 0
-    for i in range(seg_pos):
-        kw_pos += len(segment[i])
-    return (kw, kw_pos)
 
 #def set_length_range(segment: List, min_keyword_len: int, max_keyword_len: int)->List:
 #    new_segment = []

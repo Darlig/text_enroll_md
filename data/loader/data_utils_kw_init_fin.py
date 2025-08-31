@@ -87,6 +87,23 @@ def sample_kw_from_label(label: List, segment: List, kw_candidate: List=None, mi
         kw_pos += len(segment[i])
     return (kw, kw_pos)
 
+# sample positive keyword from asr label
+def sample_kw_using_whole_label(label: List, segment: List, kw_candidate: List=None, min_keyword_len: int=2, max_keyword_len: int=6)->Tuple[List, int]:
+    #match_len = 0
+    #while match_len == 0:
+    #segment = set_length_range(segment, min_keyword_len, max_keyword_len)
+    kw = [ k for word in segment for k in word ]
+    #seg_len = len(segment)
+    #seg_pos = random.randint(0, seg_len-1)
+    #kw = segment[seg_pos]
+    #kw_len = len(kw)
+    #if kw_len >= min_keyword_len and kw_len <= max_keyword_len:
+    #    match_len = 1
+    kw_pos = 0
+    #for i in range(seg_pos):
+    #    kw_pos += len(segment[i])
+    return (kw, kw_pos)
+
 def substitution_neg(positive_keyword: List[int], aux_lexicon: Dict, negative_keyword: List[int]) -> List[int]:
     #print("substitution_neg")
     n_sub = 1
@@ -196,6 +213,138 @@ def substitution_neg_by_lex(positive_keyword: List[int], aux_lexicon) -> List[in
     # target = torch.tensor(target)
     return keyword, target
 
+# transform positive keyword to negative keyword by substitution according to given lexicon, under pinyin shengyun constraint, including: 1. change init or final to another legal one; 2. change one char to another char
+def substitution_neg_by_lex_shengyun_constraint(
+    positive_keyword: List[int],
+    aux_lexicon: Dict,
+    p_change: float = 0.5,
+    type_weights: Dict = None,
+) -> Tuple[List[int], List[int]]:
+    """
+    使用说明
+      - p_change: 每个“字”被修改的概率（0~1）
+      - type_weights: 在“决定要改”后，三类方式的权重 {'init': w1, 'final': w2, 'both': w3}
+    依赖的词典
+      - aux_lexicon['by_init'][str(init)]  -> List[final]
+      - aux_lexicon['by_final'][str(final)] -> List[init]
+      - aux_lexicon['by_len']['1'] -> List[[init, final]] 仅用于 both（整字替换），不作为 init/final 的兜底
+    返回
+      - keyword_unfold: [init, final, init, final, ...]
+      - phone_target  : 等长 0/1，1=未改，0=被改
+    行为
+      - 单音素（len!=2）保持不改（与原函数一致）
+      - 若某类替换无候选，则按“优先级”回退到其他类；最终仍无候选则该字不改
+    """
+    by_init  = aux_lexicon.get('by_init', {})
+    by_final = aux_lexicon.get('by_final', {})
+    legal_pairs = aux_lexicon.get('by_len', {}).get('1', None)  # 仅供 both 使用，可能为 None
+    legal_pairs = [ p[0] for p in legal_pairs ]
+
+    # 归一化三类权重
+    tw = type_weights or {}
+    w_i = float(tw.get('init',  0.5))
+    w_f = float(tw.get('final', 0.5))
+    w_b = float(tw.get('both',  0.0))
+    s = w_i + w_f + w_b
+    if s <= 0:
+        w_i, w_f, w_b = 0.5, 0.5, 0.0
+        s = 1.0
+    p_i, p_f, p_b = w_i / s, w_f / s, w_b / s
+
+    def pick_type() -> str:
+        r = random.random()
+        if r < p_i:  return 'init'
+        r -= p_i
+        if r < p_f:  return 'final'
+        return 'both'
+
+    def try_change_init(cur_i: int, cur_f: int) -> Optional[Tuple[int,int]]:
+        # 只改声母：同韵母的其他声母
+        try:
+            cand = [i for i in by_final[str(cur_f)] if i != cur_i]
+        except Exception:
+            cand = []
+        if not cand:
+            return None
+        ni = random.choice(cand)
+        return ni, cur_f
+
+    def try_change_final(cur_i: int, cur_f: int) -> Optional[Tuple[int,int]]:
+        # 只改韵母：同声母的其他韵母
+        try:
+            cand = [f for f in by_init[str(cur_i)] if f != cur_f]
+        except Exception:
+            cand = []
+        if not cand:
+            return None
+        nf = random.choice(cand)
+        return cur_i, nf
+
+    def try_change_both(cur_i: int, cur_f: int) -> Optional[Tuple[int,int]]:
+        # 改整字：从所有合法对里随机挑一个≠原字（不依赖 by_init/by_final）
+        if not legal_pairs or len(legal_pairs) <= 1:
+            return None
+        # 尝试几次随机命中不同于原字的 pair
+        for _ in range(5):
+            ni, nf = random.choice(legal_pairs)
+            if ni != cur_i or nf != cur_f:
+                return ni, nf
+        # 退化为一次过滤后再选
+        candidates = [p for p in legal_pairs if not (p[0] == cur_i and p[1] == cur_f)]
+        if not candidates:
+            return None
+        ni, nf = random.choice(candidates)
+        return ni, nf
+
+    keyword: List[int] = []
+    target:  List[int] = []
+
+    for one_word in positive_keyword:
+        # 非 [init, final] 结构：保持不改
+        if not isinstance(one_word, list) or len(one_word) != 2:
+            uw = unfold_list(one_word)
+            keyword.extend(uw)
+            target.extend([1]*len(uw))
+            continue
+
+        cur_i, cur_f = one_word[0], one_word[1]
+
+        # 是否触发修改
+        if random.random() >= float(p_change):
+            keyword.extend([cur_i, cur_f])
+            target.extend([1, 1])
+            continue
+
+        typ = pick_type()
+        changed_pair: Optional[Tuple[int,int]] = None
+
+        if typ == 'init':
+            # 优先级：init -> final -> both
+            changed_pair = try_change_init(cur_i, cur_f) \
+                           or try_change_final(cur_i, cur_f) \
+                           or try_change_both(cur_i, cur_f)
+        elif typ == 'final':
+            # 优先级：final -> init -> both
+            changed_pair = try_change_final(cur_i, cur_f) \
+                           or try_change_init(cur_i, cur_f) \
+                           or try_change_both(cur_i, cur_f)
+        else:
+            # 优先级：both -> init -> final
+            changed_pair = try_change_both(cur_i, cur_f) \
+                           or try_change_init(cur_i, cur_f) \
+                           or try_change_final(cur_i, cur_f)
+
+        if changed_pair is None:
+            # 没有任何可替换候选：该字不改
+            keyword.extend([cur_i, cur_f])
+            target.extend([1, 1])
+        else:
+            ni, nf = changed_pair
+            keyword.extend([ni, nf])
+            # 标注 phone 级 target：0=被改，1=未改
+            target.extend([int(ni == cur_i), int(nf == cur_f)])
+
+    return keyword, target
 
 def substitution_neg_md(positive_keyword: List[int], aux_lexicon: Dict, max_sub_ratio: float=0.5, min_sub: int=1) -> List[int]:
     char_phones = aux_lexicon.get('by_len')['1']
@@ -299,7 +448,8 @@ NEG_FAMILY = {0: substitution_neg, 1: deletion_neg, 2: insertion_neg, 3: shuffle
 
 # Map method names to functions
 MD_SAMPLING_FUNCTIONS = {
-    'sample_kw_from_label': sample_kw_from_label
+    'sample_kw_from_label': sample_kw_from_label,
+    'sample_kw_using_whole_label': sample_kw_using_whole_label
 }
 
 # 2) MD negative sampling (for make_keyword_md's negative branch)
@@ -307,6 +457,7 @@ MD_SAMPLING_FUNCTIONS = {
 # Map method names to functions (both must return (keyword, phone_target))
 MD_NEG_SAMPLING_FUNCTIONS = {
     'substitution_neg_by_lex': substitution_neg_by_lex,  # existing function
+    'substitution_neg_by_lex_shengyun_constraint': substitution_neg_by_lex_shengyun_constraint,  # existing function
     'substitution_neg_md': substitution_neg_md,          # existing function
 }
 

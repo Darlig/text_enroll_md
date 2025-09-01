@@ -33,6 +33,7 @@ if [ -z $resume_from ]; then
     } &
     sleep 5
     done
+    wait
 else
     for id in `seq $world_size`;do {
           echo "Start $id"
@@ -51,6 +52,7 @@ else
     } &
     sleep 5
     done
+    wait
 fi
 
 fi

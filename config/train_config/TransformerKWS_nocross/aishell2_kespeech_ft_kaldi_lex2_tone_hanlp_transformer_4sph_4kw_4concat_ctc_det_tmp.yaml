@@ -1,0 +1,161 @@
+# model archive
+model_arch: TransformerKWSPhone_nocross_w_ctc
+
+# model config
+model_config:
+  audio_net_config:
+    input_trans: &linear_common
+      dim: [256, 256]
+      num_block: 1
+      norm: LayerNorm
+      act: ReLU
+    transformer_config: 
+      size: 256
+      self_att: MultiHeadAtt
+      self_att_config: &att_common
+        n_head: 4
+        n_feats: 256
+      cross_att: MultiHeadCrossAtt
+      corss_att_config: 
+        n_head: 1
+        n_feats: 256
+        norm: LayerNorm
+      feed_forward_config: &feed_forward_common
+        dim: [256, 512, 256]
+        num_block: 1
+        norm: LayerNorm
+        act: ReLU
+      conv_config:
+        channels: 256
+
+  kw_net_config:
+    #num_token: 31 # letter 1-26 special token ' and tow keyword pos_token 28, 29, 30 for unknown
+    num_phn_token: 217
+    input_trans: 
+      dim: 256
+      num_block: 1
+      norm: LayerNorm
+      act: ReLU
+    transformer_config:
+      size: 256
+      self_att: MultiHeadAtt
+      self_att_config: *att_common
+      feed_forward_config: *feed_forward_common
+
+  au_kw_net_config:
+    #num_token: 31 # letter 1-26 special token ' and tow keyword pos_token 28, 29, 30 for unknown
+    input_trans: 
+      dim: 256
+      num_block: 1
+      norm: LayerNorm
+      act: ReLU
+    transformer_config:
+      size: 256
+      self_att: MultiHeadAtt
+      self_att_config: *att_common
+      feed_forward_config: *feed_forward_common
+  num_audio_self_block: 4
+  num_kw_self_block: 4
+  num_au_kw_concat_block: 4
+  sok: 1
+  eok: 2
+
+# experimental config
+exp_config:
+  finetune_config:
+    trained_ckpt: "/home/weiy/project/maolidan_thesis/experiment/text_enroll_md/exp/aishell2_kespeech_kaldi_lex2_tone_hanlp_transformer_4sph_4kw_4concat_ctc_det_tmp/run_20250903_212438/kwatt_asr_4.pt"
+    pretrained_module_prefix: ["au_conv", "au_trans", "au_transformer", "kw_trans", "kw_transformer", "au_kw_transformer", "det_net"]
+  exp_dir: exp/aishell2_kespeech_ft_kaldi_lex2_tone_hanlp_transformer_4sph_4kw_4concat_ctc_det_tmp
+  warm_up_peak_epoch: 3
+  #warm_up_peak_epoch: 5
+  exp_name: kwatt_asr
+  optim_config:
+    lr: 0.001
+  log_config:
+    level: "INFO"
+    filemode: "a"
+    format:  "%(asctime)s: %(message)s"
+  log_interval: 5
+  valid_interval: 100
+
+# data config
+data_config: &base_data_config
+  epoch: 2
+  #epoch: 5
+  #epoch: 100
+  #start_epoch: 10
+  #start_epoch: 1
+  start_epoch: 0
+  #shuffle: False
+  shuffle: True
+  num_worker: 1
+  #num_worker: 6
+  sph_config: !include config/base_config/musan_nonspeech_kaldi_lex_aishell2_ke_reverb_perturb_keyword_init_final_spec0.8.yaml
+  #sph_config: !include config/base_config/self_corrupt_musan_nonspeech_kaldi_lex_aishell2_ke_reverb_perturb_keyword_init_final_spec0.8.yaml
+  keyword_config:
+    format: sample
+    config:
+      positive_prob: 0.5
+      target_level: [phone, word]
+      special_token:
+        unk: 4196
+        sop: 1
+        psok: 2
+        #peok: 2
+        punk: 216
+        with_trans: False
+        #with_trans: True
+      sample_func_choice:
+        choices:
+          - name: sample_kw_from_label
+            prob: 1.0
+            params:
+              min_keyword_len: 2
+              max_keyword_len: 5
+          - name: sample_kw_using_whole_label
+            prob: 0.0
+            params:
+              min_keyword_len: 2
+              max_keyword_len: 5
+      neg_sample_func_choice:
+        choices:
+          - name: substitution_neg_by_lex
+            prob: 0.0
+            params: {}
+          - name: substitution_neg_by_lex_shengyun_constraint
+            prob: 0.0
+            params:
+              p_change: 0.5
+              type_weights:
+                init: 0.4
+                final: 0.4
+                both: 0.2
+          - name: substitution_neg_by_lex_shengyun_constraint_tone
+            prob: 1.0
+            params:
+              p_change: 0.8
+              type_weights:
+                init: 0.1
+                final: 0.1
+                both: 0.1
+                tone: 0.7
+          - name: substitution_neg_md
+            prob: 0.0
+            params:
+              max_sub_ratio: 0.5
+              min_sub: 1
+
+  length_key: speech,keyword,target
+  fetch_key: speech,speech_len,phn_label,phn_label_len,keyword,keyword_len,kw_spec_mask,target,target_len
+  batch_size: 1
+  #batch_size: 20
+  #batch_size: 100
+  data_list: resource/aishell2_kespeech_mandarin/cut_head_100_1channel_100k_aishell/aishell_100k_word_seg/version_kaldi_ipa/datalist.valid.txt
+  #data_list: resource/aishell2_kespeech_mandarin/cut_head_100_1channel_100k_aishell/datalist.train_256k.500.txt
+  #data_list: resource/aishell2_kespeech_mandarin/cut_head_100_1channel_100k_aishell/datalist.train_256k_dup.txt
+  #data_list: resource/aishell2_kespeech_mandarin/cut_head_100_1channel_100k_aishell/datalist.train_256k.txt
+  #data_list: resource/aishell2_kespeech_mandarin/cut_head_100_1channel/datalist.train.txt
+  valid_list: resource/aishell2_kespeech_mandarin/cut_head_100_1channel_100k_aishell/aishell_100k_word_seg/version_kaldi_ipa/datalist.valid.txt
+  #valid_list: resource/aishell2_kespeech_mandarin/cut_head_100_1channel_100k_aishell/datalist.valid.txt
+  #valid_list: resource/aishell2_kespeech_mandarin/cut_head_100_1channel/datalist.valid.txt
+

@@ -1,0 +1,39 @@
+data_type: raw
+feats_type: fbank
+feats_config: !include config/feats_config/fbank.yaml
+#self_corruption:
+#  num_corrupt: 1
+#  prob: 0.65
+#  sampler: uniform
+#  sampler_config:
+#    low: 0.2
+#    high: 0.9
+none_target_corruption:
+  #corrupt_list: base.data/corruption_samp_50.list
+  corrupt_list: base.data/small_musan3.list
+  #corrupt_list: base.data/musan_music-noise.list
+  prob: 0.5
+  num_corrupt: 1
+  sampler: uniform
+  sampler_config:
+    low: 0.2
+    high: 0.9
+rirs:
+  rirs_prob: 0.8
+#rirs_list: base.data/rirs_samp_50.list
+rirs_list: base.data/rirs.list
+wav_augment:
+  volume:
+    sampler: uniform
+    config:
+      low: 0.9
+      high: 1.1
+  speed_perturb:
+    factors: [0.9, 1.0, 1.1]
+spec_augment:
+  num_t_mask: 2
+  num_f_mask: 2
+  max_t: 20
+  max_f: 10
+  spec_prob: 0.8
+aux_lexicon: resource/aishell2_kespeech_mandarin/cut_head_100_1channel_100k_aishell/aishell_100k_word_seg/version_kaldi_ipa/data_process/lexicon2_alt_tone.json

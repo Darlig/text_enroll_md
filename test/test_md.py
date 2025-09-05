@@ -130,8 +130,8 @@ def test_md(model, wav_scp_path, phone_path, human_label_path, result_label_scor
             # print("utt: {}, phones: {}, det_result: {}".format(uttid, phones_int, det_result))
             for i in range(len(det_result)):
                 f_score.write("{}.{}\t{}\t{}\t{}\n".format(uttid, i, phones_accuracy[i], det_result[i], phones_int[i]))
-                f_decode.write("{} {}\n".format(uttid, asr_result_str))
-                f_refer.write("{} {}\n".format(uttid, human_phn_str))
+            f_decode.write("{} {}\n".format(uttid, asr_result_str))
+            f_refer.write("{} {}\n".format(uttid, human_phn_str))
 
 
 def load_dataset(wav_scp_path, phone_path, human_label_path):

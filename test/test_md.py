@@ -99,11 +99,13 @@ def inference(model, wav_path, phones_int, target_level, special_token):
         input = (fbank, fbank_len, phones_int, phones_len, kw_spec_mask)
         input_data = (d.to('cuda:0') for d in input)
         det_result, hyp_result = model.evaluate(input_data)
+        asr_result = model.greedy_decode(hyp_result)
         det_result = det_result[0]
         hyp_result = hyp_result.cpu().numpy()[0]
+        asr_result = asr_result[0]
         det_result = result_extract(det_result, target_level)
         det_result = det_result.cpu().numpy()
-        return det_result, hyp_result
+        return det_result, hyp_result, asr_result
 
 def test_md(model, wav_scp_path, phone_path, human_label_path, result_label_score_path, target_level, special_token):
     if os.path.exists(result_label_score_path):
@@ -111,18 +113,25 @@ def test_md(model, wav_scp_path, phone_path, human_label_path, result_label_scor
         return
     data_list = load_dataset(wav_scp_path, phone_path, human_label_path)
     print("Loaded {} utterances for testing.".format(len(data_list)))
-    with open(result_label_score_path, 'w') as f:
+    result_dir = os.path.dirname(result_label_score_path)
+    result_decode_path = os.path.join(result_dir, 'result_decode.txt')
+    reference_path = os.path.join(result_dir, 'reference.txt')
+    with open(result_label_score_path, 'w') as f_score, open(result_decode_path, 'w') as f_decode, open(reference_path, 'w') as f_refer:
         for n, (uttid, wav_path, phones_int, phones_accuracy) in enumerate(data_list):
             if n % 2000 == 0:
                 print("Inferencing {}th utterance: {}".format(n, uttid))
             try:
-                det_result, hyp_result = inference(model, wav_path, phones_int, target_level, special_token)
+                det_result, hyp_result, asr_result = inference(model, wav_path, phones_int, target_level, special_token)
+                asr_result_str = " ".join([ str(p) for p in asr_result ])
+                human_phn_str = " ".join(phones_int)
             except Exception as e:
                 print(f"Error processing {uttid}: {e}")
                 continue
             # print("utt: {}, phones: {}, det_result: {}".format(uttid, phones_int, det_result))
             for i in range(len(det_result)):
-                f.write("{}.{}\t{}\t{}\t{}\n".format(uttid, i, phones_accuracy[i], det_result[i], phones_int[i]))
+                f_score.write("{}.{}\t{}\t{}\t{}\n".format(uttid, i, phones_accuracy[i], det_result[i], phones_int[i]))
+                f_decode.write("{} {}\n".format(uttid, asr_result_str))
+                f_refer.write("{} {}\n".format(uttid, human_phn_str))
 
 
 def load_dataset(wav_scp_path, phone_path, human_label_path):
@@ -180,7 +189,7 @@ def plot_roc_curve(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
     plt.savefig(plt_path, dpi=400)
     return roc_auc
 
-def plot_pr_curve_and_analysis(ref_score, hyp_score, test_result_dir, analysis_id, word_py, target_precison):
+def plot_pr_curve_and_analysis(ref_score, hyp_score, test_result_dir, analysis_id, word_py, target_precision):
     # from sklearn.metrics import precision_recall_curve
 
     precision, recall, thresholds = precision_recall_curve(ref_score, hyp_score)
@@ -191,10 +200,11 @@ def plot_pr_curve_and_analysis(ref_score, hyp_score, test_result_dir, analysis_i
     #     print("{} {} {}".format(precision[i], recall[i], thresholds[i]))
 
     # find the threshold that gives the target precision
-    target_precision_index = np.argmin(np.abs(precision - target_precison))
+    target_precision_index = np.argmin(np.abs(precision - target_precision))
     target_recall = recall[target_precision_index]
     target_threshold = thresholds[target_precision_index]
-    print("target precision: {}, recall: {}, threshold: {}".format(target_precison, target_recall, target_threshold))
+    target_f1 = 2 * target_precision * target_recall / (target_precision + target_recall + 1e-12)
+    print("target precision: {}, recall: {}, f1-score: {}, threshold: {}".format(target_precision, target_recall, target_f1, target_threshold))
 
     plt.figure()
     plt.plot(recall, precision, color='darkorange', lw=2, marker='o')

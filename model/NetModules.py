@@ -55,6 +55,32 @@ class CTC(nn.Module):
     def get_hyp(self, logit):
         return self.linear_project(logit)
 
+    @staticmethod
+    @torch.no_grad()
+    def ctc_greedy_decode(logits, blank_id=0, input_lengths=None):
+        """
+        logits: (B, T, C) 未归一化分数
+        input_lengths: (B,) 每条序列有效帧长（可选；有下采样或padding时建议提供）
+        返回: List[List[int]]，每条样本的token id序列（已做CTC折叠并去blank）
+        """
+        log_probs = F.log_softmax(logits, dim=-1)     # (B, T, C)
+        pred_ids = log_probs.argmax(dim=-1)           # (B, T)
+
+        results = []
+        B, T = pred_ids.shape
+        for b in range(B):
+            T_eff = int(input_lengths[b]) if input_lengths is not None else T
+            prev = None
+            out = []
+            for t in range(T_eff):
+                p = int(pred_ids[b, t])
+                # CTC 折叠规则：1) 忽略 blank；2) 连续重复只保留一个
+                if p != blank_id and p != prev:
+                    out.append(p)
+                prev = p
+            results.append(out)
+        return results
+
 class LabelSmoothingLoss(nn.Module):
 
     def __init__(self,

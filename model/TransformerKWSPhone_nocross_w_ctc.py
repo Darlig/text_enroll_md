@@ -395,6 +395,11 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
 
 
     @torch.no_grad()
+    def greedy_decode(self, phn_asr_hyp):
+        return self.phn_asr_crit.ctc_greedy_decode(phn_asr_hyp)
+
+
+    @torch.no_grad()
     def evaluate_sph_emb(self, input_data, return_hyp=False):
         sph_input, sph_len = input_data
         b,t,d = sph_input.size()

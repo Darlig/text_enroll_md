@@ -400,6 +400,15 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
 
 
     @torch.no_grad()
+    def compute_gop(self, phn_asr_hyp, phn_label):
+        phn_asr_hyp = phn_asr_hyp.squeeze(0)
+        phn_label = phn_label.squeeze(0)
+        ali_spans = self.phn_asr_crit.ctc_forced_align_viterbi(phn_asr_hyp, phn_label)
+        gop_result = self.phn_asr_crit.gop_avg_ctc_max_norm(phn_asr_hyp, ali_spans, phn_label)
+        return gop_result
+
+
+    @torch.no_grad()
     def evaluate_sph_emb(self, input_data, return_hyp=False):
         sph_input, sph_len = input_data
         b,t,d = sph_input.size()

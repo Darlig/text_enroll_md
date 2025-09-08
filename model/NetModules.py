@@ -81,6 +81,179 @@ class CTC(nn.Module):
             results.append(out)
         return results
 
+    @staticmethod
+    @torch.no_grad()
+    def ctc_forced_align_viterbi(logits: torch.Tensor, target_phones: torch.Tensor, blank_id: int=0):
+        """
+        logits:         (T, C) 未归一化分数
+        target_phones:  (U,)  不含 blank 的音素序列
+        返回：每个 target_phones 音素的 [start_t, end_t) 编码器帧区间（左闭右开）
+        """
+        log_probs = F.log_softmax(logits, dim=-1)  # (T, C)
+        device = log_probs.device
+        T, C = log_probs.size()
+        # 扩展序列 y' = [b, p1, b, p2, ..., b, pU, b]  长度 S = 2U+1
+        ext = torch.full((2*len(target_phones)+1,), blank_id, dtype=torch.long, device=device)
+        ext[1::2] = target_phones
+        S = ext.size(0)
+
+        # DP 表与回溯指针
+        neg_inf = -1e9
+        dp = torch.full((T, S), neg_inf, device=device)
+        ptr = torch.full((T, S), -1, dtype=torch.int16, device=device)
+
+        # t=0 初始化：只能停在 ext[0]=blank 或（如果 S>1）ext[1]=p1
+        dp[0,0] = log_probs[0, ext[0]]
+        if S > 1:
+            dp[0,1] = log_probs[0, ext[1]]
+            ptr[0,1] = 1  # 来自“停在自己”（无所谓，初始化）
+
+        # 允许的转移：
+        # stay: s -> s
+        # move: s-1 -> s
+        # skip: s-2 -> s  (仅当 ext[s] != blank 且 ext[s] != ext[s-2])
+        for t in range(1, T):
+            for s in range(S):
+                candidates = []
+                # stay
+                best_score, arg = dp[t-1, s], s
+                # move
+                if s-1 >= 0 and dp[t-1, s-1] > best_score:
+                    best_score, arg = dp[t-1, s-1], s-1
+                # skip
+                if s-2 >= 0 and ext[s] != blank_id and ext[s] != ext[s-2]:
+                    if dp[t-1, s-2] > best_score:
+                        best_score, arg = dp[t-1, s-2], s-2
+                dp[t, s] = best_score + log_probs[t, ext[s]]
+                ptr[t, s] = arg
+
+        # 结束：取最后一帧在 s=S-1 或 S-2 的较大者
+        last_s = S-1 if dp[-1, S-1] >= dp[-1, S-2] else S-2
+
+        # 回溯得到最优路径 (T,)
+        path_s = torch.empty(T, dtype=torch.int16, device=device)
+        s = last_s
+        for t in range(T-1, -1, -1):
+            path_s[t] = s
+            s = ptr[t, s] if t > 0 else s
+
+        # 将路径上的 ext 位置映射到音素 ID，并收集边界
+        # 只对 ext 的奇数位（真正音素）做边界
+        spans = []  # [(start_t, end_t), ...] len=U
+        U = len(target_phones)
+        for u in range(U):
+            s_idx = 2*u+1  # ext 的奇数位
+            frames = (path_s == s_idx).nonzero(as_tuple=False).flatten()
+            if len(frames) == 0:
+                # 该音素未被对齐（通常是插删导致），做个兜底：借邻近边界
+                # 这里给出 None，方便上层再行插补
+                spans.append((None, None))
+            else:
+                start_t = int(frames[0].item())
+                end_t   = int(frames[-1].item()) + 1  # 右开
+                spans.append((start_t, end_t))
+        return spans
+    
+    @staticmethod
+    @torch.no_grad()
+    def gop_avg_ctc_max_norm(
+        logits: torch.Tensor,             # (T, C) 未 log_softmax
+        spans: list,                      # [(start_t, end_t), ...] 与 phones 对齐
+        target_phones: torch.Tensor,      # (U,) 目标音素ID（与 spans 一一对应）
+        blank_id: int = 0,
+        candidate_phones: list = None,    # 候选集；默认=所有非blank类
+        normalize_nonblank: bool = True,  # True: 仅在非blank上重归一化
+        use_blank_filter: bool = False,   # True: 仅使用 p(blank) < 阈值 的帧
+        blank_thresh: float = 0.6,
+        eps: float = 1e-12
+    ):
+        """
+        返回：list[dict]，每个片段包含：
+        - 'phone_id'         目标音素
+        - 'start','end'
+        - 'gop'              归一化后的GOP in (0,1]，None表示该段无有效帧
+        - 'score_target'     目标音素的平均对数后验 s_target
+        - 'best_phone'       该段上最优音素
+        - 'best_score'       该段最大平均对数后验 s_max
+        - 'num_frames_used'  用到的帧数
+        """
+        phones = target_phones.tolist()
+        log_probs = F.log_softmax(logits, dim=-1)  # (T, C)
+        T, C = log_probs.shape
+        probs = log_probs.exp()  # (T, C)
+
+        # 只在非 blank 上重归一化（推荐）
+        if normalize_nonblank:
+            mask = torch.ones(C, device=probs.device)
+            mask[blank_id] = 0.0
+            denom = (probs * mask).sum(dim=-1, keepdim=True) + eps
+            p = probs * mask
+            p = p / denom
+        else:
+            p = probs
+
+        # 候选音素集合
+        if candidate_phones is None:
+            candidate_phones = [i for i in range(C) if i != blank_id]
+        cand = torch.as_tensor(candidate_phones, device=p.device, dtype=torch.long)
+
+        results = []
+        for (s, e), y in zip(spans, phones):
+            # 基本合法性检查
+            if s is None or e is None or not (0 <= s < e <= T):
+                results.append({
+                    'phone_id': int(y), 'start': s, 'end': e,
+                    'gop': None, 'score_target': None,
+                    'best_phone': None, 'best_score': None,
+                    'num_frames_used': 0
+                })
+                continue
+
+            idx = torch.arange(s, e, device=p.device)
+            if use_blank_filter:
+                idx = idx[(probs[idx, blank_id] < blank_thresh)]
+                if idx.numel() == 0:
+                    results.append({
+                        'phone_id': int(y), 'start': int(s), 'end': int(e),
+                        'gop': None, 'score_target': None,
+                        'best_phone': None, 'best_score': None,
+                        'num_frames_used': 0
+                    })
+                    continue
+
+            # 该段落的候选音素平均对数后验：s_k = mean_t log p_t(k)
+            seg_p = torch.clamp(p[idx][:, cand], min=eps)     # (L, K)
+            seg_log = torch.log(seg_p)                        # (L, K)
+            s_k = seg_log.mean(dim=0)                         # (K,)
+
+            # 找到最大聚合值及对应音素
+            best_idx = int(torch.argmax(s_k).item())
+            best_phone = int(cand[best_idx].item())
+            best_score = float(s_k[best_idx].item())
+
+            # 目标音素的聚合分数
+            if y in candidate_phones:
+                y_pos = (cand == y).nonzero(as_tuple=False).item()
+                score_target = float(s_k[y_pos].item())
+            else:
+                # 目标不在候选集时，单独取其列（若需要）
+                py = torch.clamp(p[idx, y], min=eps)
+                score_target = float(torch.log(py).mean().item())
+
+            # 用最大值做归一化：exp(s_target - s_max) ∈ (0,1]
+            gop = float(torch.exp(torch.tensor(score_target - best_score)).item())
+
+            results.append({
+                'phone_id': int(y),
+                'start': int(s), 'end': int(e),
+                'gop': gop,
+                'score_target': score_target,
+                'best_phone': best_phone,
+                'best_score': best_score,
+                'num_frames_used': int(idx.numel())
+            })
+        return results
+        
 class LabelSmoothingLoss(nn.Module):
 
     def __init__(self,

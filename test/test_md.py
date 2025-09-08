@@ -76,7 +76,7 @@ def result_extract(det_result, target_level):
         det_result = det_result[1:]
     return det_result
 
-def inference(model, wav_path, phones_int, target_level, special_token, is_decode=False):
+def inference(model, wav_path, phones_int, target_level, special_token, is_decode=False, is_gop=False):
     with torch.no_grad():
         # Load wav file
         wav = torchaudio.load(wav_path)[0]
@@ -89,10 +89,12 @@ def inference(model, wav_path, phones_int, target_level, special_token, is_decod
         phones_int = [int(ph) for ph in phones_int]
         # print("phones_int shape: {}".format(len(phones_int)))
         # print("phones_int: {}".format(phones_int))
+        phones_int_org = phones_int.copy()
         phones_int, kw_spec_mask = insert_special_token(phones_int, target_level, special_token)
         # print("phones_int after insert sop token: {}".format(phones_int))
         phones_len = torch.tensor([len(phones_int)])
         phones_int = torch.tensor(phones_int, dtype=torch.int64, device='cuda:0').unsqueeze(0)
+        phones_int_org = torch.tensor(phones_int_org, dtype=torch.int64, device='cuda:0').unsqueeze(0)
         kw_spec_mask = torch.tensor(kw_spec_mask, dtype=torch.int64, device='cuda:0').unsqueeze(0)
         # phones_accuracy = torch.tensor(phones_accuracy, dtype=torch.float32, device='cuda:0').unsqueeze(0)
 
@@ -104,14 +106,19 @@ def inference(model, wav_path, phones_int, target_level, special_token, is_decod
             asr_result = asr_result[0]
         else:
             asr_result = None
+        if is_gop:
+            gop_result = model.compute_gop(hyp_result, phones_int_org)
+            # print("gop_result: ", gop_result)
+        else:
+            gop_result = None
         det_result = det_result[0]
         hyp_result = hyp_result.cpu().numpy()[0]
         det_result = result_extract(det_result, target_level)
         det_result = det_result.cpu().numpy()
-        return det_result, hyp_result, asr_result
+        return det_result, hyp_result, asr_result, gop_result
 
 
-def test_md(model, wav_scp_path, phone_path, human_label_path, result_label_score_path, target_level, special_token, is_decode=False):
+def test_md(model, wav_scp_path, phone_path, human_label_path, result_label_score_path, target_level, special_token, is_decode=False, is_gop=False):
     if os.path.exists(result_label_score_path):
         print("Result file already exists: {}. Skip md test.".format(result_label_score_path))
         return
@@ -120,15 +127,18 @@ def test_md(model, wav_scp_path, phone_path, human_label_path, result_label_scor
     result_dir = os.path.dirname(result_label_score_path)
     result_decode_path = os.path.join(result_dir, 'result_decode.txt')
     reference_path = os.path.join(result_dir, 'reference.txt')
+    result_gop_path = os.path.join(result_dir, 'result_gop.txt')
     f_score = open(result_label_score_path, 'w')
     if is_decode:
         f_decode = open(result_decode_path, 'w')
         f_refer = open(reference_path, 'w')
+    if is_gop:
+        f_gop = open(result_gop_path, 'w')
     for n, (uttid, wav_path, phones_int, phones_accuracy) in enumerate(data_list):
         if n % 2000 == 0:
             print("Inferencing {}th utterance: {}".format(n, uttid))
         try:
-            det_result, hyp_result, asr_result = inference(model, wav_path, phones_int, target_level, special_token, is_decode)
+            det_result, hyp_result, asr_result, gop_result = inference(model, wav_path, phones_int, target_level, special_token, is_decode, is_gop)
         except Exception as e:
             print(f"Error processing {uttid}: {e}")
             continue
@@ -140,6 +150,9 @@ def test_md(model, wav_scp_path, phone_path, human_label_path, result_label_scor
             human_phn_str = " ".join(phones_int)
             f_decode.write("{} {}\n".format(uttid, asr_result_str))
             f_refer.write("{} {}\n".format(uttid, human_phn_str))
+        if is_gop:
+            for i in range(len(gop_result)):
+                f_gop.write("{}.{}\t{}\t{}\t{}\n".format(uttid, i, phones_accuracy[i], gop_result[i]["gop"], phones_int[i]))
     f_score.close()
     if is_decode:
         f_decode.close()
@@ -339,6 +352,7 @@ if __name__ == '__main__':
         result_label_score_path,
         target_level,
         special_token,
-        is_decode=test_config.get('is_decode', False)
+        is_decode=test_config.get('is_decode', False),
+        is_gop=test_config.get('is_gop', False)
     )
     result_analysis(result_label_score_path)

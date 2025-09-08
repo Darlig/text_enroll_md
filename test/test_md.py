@@ -256,7 +256,7 @@ def plot_sample_distribution(ref_score, hyp_score, test_result_dir, analysis_id,
     plt.savefig(plt_path, dpi=400)
 
 # def compute_dcf(y_true, y_scores, cost_miss, cost_fa, prior_target, test_result_dir, analysis_id, word_id, roc_auc, f_out_csv):
-def compute_dcf(y_true, y_scores, cost_miss, cost_fa, prior_target):
+def compute_dcf(y_true, y_scores, cost_miss, cost_fa, prior_target, analysis_id):
     assert cost_miss > 0 and cost_miss <= 1
     assert cost_fa > 0 and cost_fa <= 1
     assert prior_target > 0 and prior_target < 1
@@ -278,6 +278,7 @@ def compute_dcf(y_true, y_scores, cost_miss, cost_fa, prior_target):
     # best_precision = 1 - fpr[dcf_index]
     dcf_index_pr = np.argmin(abs(dcf_threshold - thresholds_pr))
     best_precision = precision[dcf_index_pr]
+    print("{} DCF:".format(analysis_id))
     print("cost_miss: {0}, cost_fa: {1}".format(cost_miss, cost_fa))
     print("prior_target: {0}".format(prior_target))
     print("DCF: {0:f}".format(dcf))
@@ -290,7 +291,7 @@ def compute_dcf(y_true, y_scores, cost_miss, cost_fa, prior_target):
     # f_out_csv.write("{}\n".format(", ".join([str(word_id), str(roc_auc), str(cost_miss), str(cost_fa), str(prior_target), str(dcf), str(dcf_threshold), str(1-tpr[dcf_index]), str(fpr[dcf_index]), str(fpr[dcf_index]*shift_per_hour)])))
 
 
-def result_analysis(result_label_score_path):
+def result_analysis(result_label_score_path, is_gop=False):
     all_results = []
     # y_true = []
     # y_scores = []
@@ -309,11 +310,12 @@ def result_analysis(result_label_score_path):
         # print("length of y_scores: {}".format(len(y_scores)))
         # print(y_scores[:10])
         print(len(y_true), len(y_scores))
-    plot_roc_curve(y_true, y_scores, os.path.dirname(result_label_score_path), "analysis", "all")
-    plot_pr_curve_and_analysis(y_true, y_scores, os.path.dirname(result_label_score_path), "analysis", "all", 0.21)
-    plot_sample_distribution(y_true, y_scores, os.path.dirname(result_label_score_path), "analysis", "all")
+    analysis_id = "analysis" if not is_gop else "gop_analysis"
+    plot_roc_curve(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all")
+    plot_pr_curve_and_analysis(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all", 0.21)
+    plot_sample_distribution(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all")
     compute_dcf(
-        y_true, y_scores, cost_miss=1.0, cost_fa=1.0, prior_target=0.5
+        y_true, y_scores, cost_miss=1.0, cost_fa=1.0, prior_target=0.5, analysis_id=analysis_id
     )
 
 if __name__ == '__main__':
@@ -356,3 +358,6 @@ if __name__ == '__main__':
         is_gop=test_config.get('is_gop', False)
     )
     result_analysis(result_label_score_path)
+    if test_config.get('is_gop', False):
+        gop_result_label_score_path = os.path.join(os.path.dirname(result_label_score_path), 'result_gop.txt')
+        result_analysis(gop_result_label_score_path, is_gop=True)

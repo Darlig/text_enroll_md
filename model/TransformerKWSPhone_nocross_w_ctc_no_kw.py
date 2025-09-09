@@ -308,53 +308,30 @@ class TransformerKWSPhone_nocross_w_ctc_no_kw(nn.Module):
 
     @torch.no_grad()
     def evaluate(self, input_data):
-        sph_input, sph_len, kw_label, kw_len, kw_spec_mask = input_data
+        sph_input, sph_len = input_data
         b,t,d = sph_input.size()
         sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
         sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
         sph_mask = ~NM.make_mask(sph_len).unsqueeze(1)
-        kw_mask = ~NM.make_mask(kw_len).unsqueeze(1)
 
         # embedding
         sph_emb = self.au_conv(sph_input.unsqueeze(1))
         b, c, t, d = sph_emb.size()
         sph_emb = self.au_conv_trans(sph_emb.transpose(1,2).contiguous().view(b, t, c * d))
         sph_emb = self.au_trans(sph_emb)
-        kw_emb = self.phn_emb(kw_label.to(torch.long))
-        kw_emb = self.kw_trans(kw_emb)
 
         # add position embedding
         sph_emb = self.au_pos_emb(sph_emb)
-        kw_emb = self.kw_pos_emb(kw_emb)
 
-        kw_emb = self.forward_transformer(
-            self.kw_transformer,
-            kw_emb,
-            mask=kw_mask,
-        )
         sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
-        sph_kw_emb = torch.cat([kw_emb, sph_emb], dim=1)
-        sph_kw_mask = torch.cat([kw_mask, sph_mask], dim=-1)
-        for i, tf_layer in enumerate(self.au_b_transformer):
-            sph_kw_emb, _ = tf_layer(sph_kw_emb, sph_kw_mask, cross_input=None)
 
-        det_result = self.det_net(sph_kw_emb[:,0:kw_emb.size(1),:])[:,:,0]
-        selected_list = []
-        for bi in range(b):
-            sel_b = det_result[bi][kw_spec_mask[bi] > 0]
-            selected_list.append(sel_b)
-        det_result = pad_list(selected_list, 0.0).to(sph_kw_emb.device)
-        det_result = torch.sigmoid(det_result)
-        
-        # print("det_result size: {}".format(det_result.size()))
-        # print("sph_kw_emb size: {}".format(sph_kw_emb.size()))
-        sph_emb = sph_kw_emb[:,kw_emb.size(1):,:]
+        for i, tf_layer in enumerate(self.au_b_transformer):
+            sph_emb, _ = tf_layer(sph_emb, sph_mask, cross_input=None)
 
         phn_asr_hyp = self.phn_asr_crit.get_hyp(sph_emb)
 
-
         # decoder output 
-        return det_result, phn_asr_hyp
+        return phn_asr_hyp
 
 
     @torch.no_grad()

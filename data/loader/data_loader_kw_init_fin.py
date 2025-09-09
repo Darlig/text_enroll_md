@@ -290,7 +290,9 @@ def Dataset(conf: Dict,  d_list: List) -> Tuple[Any, ...]:
     else:
         fetch_key = ['speech', 'label', 'keyword']
     
-    dataset = Processer(dataset, factory.data_statistic, 500)
+    if conf.get('data_statistic', False):
+        # for debug
+        dataset = Processer(dataset, factory.data_statistic, 500)
 
     # fetch tensor
     dataset = Processer(dataset, factory.fetch_tensor, fetch_key)

@@ -89,19 +89,19 @@ class TransformerKWSPhone_nocross_w_ctc_no_kw(nn.Module):
         au_hidden_dim = au_transformer_config['size']
 
         # vocab config
-        kw_input_trans_config = kw_net_config['input_trans']
+        # kw_input_trans_config = kw_net_config['input_trans']
         num_phn_token = kw_net_config['num_phn_token']
-        kw_transformer_config = kw_net_config['transformer_config']
-        kw_self_att = att_dict[kw_transformer_config['self_att']]
-        kw_self_att_cofing = kw_transformer_config['self_att_config']
-        kw_feed_forward_config = kw_transformer_config['feed_forward_config']
-        kw_hidden_dim = kw_transformer_config['size']
+        # kw_transformer_config = kw_net_config['transformer_config']
+        # kw_self_att = att_dict[kw_transformer_config['self_att']]
+        # kw_self_att_cofing = kw_transformer_config['self_att_config']
+        # kw_feed_forward_config = kw_transformer_config['feed_forward_config']
+        # kw_hidden_dim = kw_transformer_config['size']
 
-        au_kw_transformer_config = au_kw_net_config['transformer_config']
-        au_kw_self_att = att_dict[au_kw_transformer_config['self_att']]
-        au_kw_self_att_cofing = au_kw_transformer_config['self_att_config']
-        au_kw_feed_forward_config = au_kw_transformer_config['feed_forward_config']
-        au_kw_hidden_dim = au_kw_transformer_config['size']
+        au_b_transformer_config = au_kw_net_config['transformer_config']
+        au_kw_self_att = att_dict[au_b_transformer_config['self_att']]
+        au_kw_self_att_cofing = au_b_transformer_config['self_att_config']
+        au_kw_feed_forward_config = au_b_transformer_config['feed_forward_config']
+        au_kw_hidden_dim = au_b_transformer_config['size']
 
         self.l1, self.l2 = loss_weight
 
@@ -127,28 +127,28 @@ class TransformerKWSPhone_nocross_w_ctc_no_kw(nn.Module):
             ) for _ in range(num_audio_self_block)
         ])
 
-        # kw net
-        self.phn_emb = NM.WordEmbedding(
-            num_tokens=num_phn_token, dim=kw_transformer_config['size']
-        )
-        self.kw_trans = NM.FNNBlock(**kw_input_trans_config)
-        self.kw_pos_emb = NM.PositionalEncoding(kw_hidden_dim)
-        self.kw_transformer = nn.ModuleList([
-            NM.TransformerLayer(
-                size=kw_hidden_dim,
-                self_att=kw_self_att(**kw_self_att_cofing),
-                feed_forward=NM.FNNBlock(**kw_feed_forward_config)
-            ) for _ in range(num_kw_self_block)
-        ])
-        if kw_hidden_dim != au_hidden_dim:
-            self.kw_au_link = nn.Linear(kw_hidden_dim, au_hidden_dim)
-        else:
-            self.kw_au_link = nn.Identity()
+        # # kw net
+        # self.phn_emb = NM.WordEmbedding(
+        #     num_tokens=num_phn_token, dim=kw_transformer_config['size']
+        # )
+        # self.kw_trans = NM.FNNBlock(**kw_input_trans_config)
+        # self.kw_pos_emb = NM.PositionalEncoding(kw_hidden_dim)
+        # self.kw_transformer = nn.ModuleList([
+        #     NM.TransformerLayer(
+        #         size=kw_hidden_dim,
+        #         self_att=kw_self_att(**kw_self_att_cofing),
+        #         feed_forward=NM.FNNBlock(**kw_feed_forward_config)
+        #     ) for _ in range(num_kw_self_block)
+        # ])
+        # if kw_hidden_dim != au_hidden_dim:
+        #     self.kw_au_link = nn.Linear(kw_hidden_dim, au_hidden_dim)
+        # else:
+        #     self.kw_au_link = nn.Identity()
 
-        # au kw concat net
-        self.au_kw_pos_emb = NM.PositionalEncoding(au_kw_hidden_dim)
+        # # au kw concat net
+        # self.au_kw_pos_emb = NM.PositionalEncoding(au_kw_hidden_dim)
 
-        self.au_kw_transformer = nn.ModuleList([
+        self.au_b_transformer = nn.ModuleList([
             NM.TransformerLayer(
                 size=au_kw_hidden_dim,
                 self_att=au_kw_self_att(**au_kw_self_att_cofing),
@@ -163,11 +163,11 @@ class TransformerKWSPhone_nocross_w_ctc_no_kw(nn.Module):
         }
         self.phn_asr_crit = NM.CTC(**phn_ctc_conf)
 
-        # detection net
-        self.det_net = nn.Sequential(
-            NM.FNNBlock(**au_feed_forward_config), nn.Linear(au_hidden_dim, 1)
-        )
-        self.det_crit = nn.BCEWithLogitsLoss(reduction='mean')
+        # # detection net
+        # self.det_net = nn.Sequential(
+        #     NM.FNNBlock(**au_feed_forward_config), nn.Linear(au_hidden_dim, 1)
+        # )
+        # self.det_crit = nn.BCEWithLogitsLoss(reduction='mean')
 
 
     def forward_transformer(
@@ -291,7 +291,7 @@ class TransformerKWSPhone_nocross_w_ctc_no_kw(nn.Module):
         sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
 
         detail_loss = {}
-        for i, tf_layer in enumerate(self.au_kw_transformer):
+        for i, tf_layer in enumerate(self.au_b_transformer):
             sph_emb, _ = tf_layer(sph_emb, sph_mask, cross_input=None)
 
         # asr loss
@@ -335,7 +335,7 @@ class TransformerKWSPhone_nocross_w_ctc_no_kw(nn.Module):
         sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
         sph_kw_emb = torch.cat([kw_emb, sph_emb], dim=1)
         sph_kw_mask = torch.cat([kw_mask, sph_mask], dim=-1)
-        for i, tf_layer in enumerate(self.au_kw_transformer):
+        for i, tf_layer in enumerate(self.au_b_transformer):
             sph_kw_emb, _ = tf_layer(sph_kw_emb, sph_kw_mask, cross_input=None)
 
         det_result = self.det_net(sph_kw_emb[:,0:kw_emb.size(1),:])[:,:,0]

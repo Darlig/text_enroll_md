@@ -291,7 +291,7 @@ def compute_dcf(y_true, y_scores, cost_miss, cost_fa, prior_target, analysis_id)
     # f_out_csv.write("{}\n".format(", ".join([str(word_id), str(roc_auc), str(cost_miss), str(cost_fa), str(prior_target), str(dcf), str(dcf_threshold), str(1-tpr[dcf_index]), str(fpr[dcf_index]), str(fpr[dcf_index]*shift_per_hour)])))
 
 
-def result_analysis(result_label_score_path, is_gop=False):
+def result_analysis(result_label_score_path, is_gop=False, target_precision=0.21):
     all_results = []
     # y_true = []
     # y_scores = []
@@ -312,7 +312,7 @@ def result_analysis(result_label_score_path, is_gop=False):
         print(len(y_true), len(y_scores))
     analysis_id = "analysis" if not is_gop else "gop_analysis"
     plot_roc_curve(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all")
-    plot_pr_curve_and_analysis(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all", 0.21)
+    plot_pr_curve_and_analysis(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all", target_precision)
     plot_sample_distribution(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all")
     compute_dcf(
         y_true, y_scores, cost_miss=1.0, cost_fa=1.0, prior_target=0.5, analysis_id=analysis_id
@@ -329,6 +329,7 @@ if __name__ == '__main__':
     # sop_token = train_config['data_config']['keyword_config']['config']['special_token']['sop']
     # keyword_config = train_config['data_config']['keyword_config']['config']
     result_label_score_path = test_config['result_label_score']
+    target_precision = test_config.get('target_precision', 0.21)
     # default_target_level = ['phone']
     # default_special_token = {'sop': 1}
     # if 'target_level' in keyword_config:
@@ -358,4 +359,4 @@ if __name__ == '__main__':
     # result_analysis(result_label_score_path)
     if test_config.get('is_gop', False):
         gop_result_label_score_path = os.path.join(os.path.dirname(result_label_score_path), 'result_gop.txt')
-        result_analysis(gop_result_label_score_path, is_gop=True)
+        result_analysis(gop_result_label_score_path, is_gop=True, target_precision=target_precision)

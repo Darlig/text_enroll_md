@@ -233,6 +233,9 @@ def plot_pr_curve_and_analysis(ref_score, hyp_score, test_result_dir, analysis_i
 
     plt.figure()
     plt.plot(recall, precision, color='darkorange', lw=2, marker='o')
+    plt.scatter([target_recall], [target_precision], color='red', marker='x', s=100, label='Precision Point (P={:.2f}, R={:.2f})'.format(target_precision, target_recall))
+    plt.legend(loc="lower left")
+
     plt.xlabel('Recall')
     plt.ylabel('Precision')
     plt.title('Precision-Recall curve for {}'.format(word_py))

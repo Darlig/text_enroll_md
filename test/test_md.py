@@ -252,7 +252,7 @@ def plot_pr_curve_and_analysis(ref_score, hyp_score, test_result_dir, analysis_i
             'threshold': selected_threshold
         })
         
-        print("Target P={:.3f} -> Actual P={:.3f}, R={:.3f}, F1={:.3f}, Threshold={:.6f}".format(
+        print("Target P={:.4f} -> Actual P={:.4f}, R={:.4f}, F1={:.4f}, Threshold={:.6f}".format(
             target_p, selected_precision, selected_recall, target_f1, selected_threshold))
 
     plt.figure()

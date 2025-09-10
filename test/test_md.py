@@ -225,15 +225,16 @@ def plot_pr_curve_and_analysis(ref_score, hyp_score, test_result_dir, analysis_i
     #     print("{} {} {}".format(precision[i], recall[i], thresholds[i]))
 
     # find the threshold that gives the target precision
-    target_precision_index = np.argmin(np.abs(precision - target_precision))
-    target_recall = recall[target_precision_index]
-    target_threshold = thresholds[target_precision_index]
-    target_f1 = 2 * target_precision * target_recall / (target_precision + target_recall + 1e-12)
-    print("target precision: {}, recall: {}, f1-score: {}, threshold: {}".format(target_precision, target_recall, target_f1, target_threshold))
+    closest_precision_index = np.argmin(np.abs(precision - target_precision))
+    selected_precision = precision[closest_precision_index]
+    selected_recall = recall[closest_precision_index]
+    selected_threshold = thresholds[closest_precision_index]
+    target_f1 = 2 * selected_precision * selected_recall / (selected_precision + selected_recall + 1e-12)
+    print("target precision: {}, recall: {}, f1-score: {}, threshold: {}".format(selected_precision, selected_recall, target_f1, selected_threshold))
 
     plt.figure()
     plt.plot(recall, precision, color='darkorange', lw=2, marker='o')
-    plt.scatter([target_recall], [target_precision], color='red', marker='x', s=100, label='Precision Point (P={:.2f}, R={:.2f})'.format(target_precision, target_recall))
+    plt.scatter([selected_recall], [selected_precision], color='red', marker='x', s=100, label='Precision Point (P={:.2f}, R={:.2f})'.format(selected_precision, selected_recall))
     plt.legend(loc="lower left")
 
     plt.xlabel('Recall')

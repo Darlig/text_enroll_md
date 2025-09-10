@@ -224,19 +224,51 @@ def plot_pr_curve_and_analysis(ref_score, hyp_score, test_result_dir, analysis_i
     # for i in range(len(precision) - 10, len(precision) -1):
     #     print("{} {} {}".format(precision[i], recall[i], thresholds[i]))
 
-    # find the threshold that gives the target precision
-    closest_precision_index = np.argmin(np.abs(precision - target_precision))
-    selected_precision = precision[closest_precision_index]
-    selected_recall = recall[closest_precision_index]
-    selected_threshold = thresholds[closest_precision_index]
-    target_f1 = 2 * selected_precision * selected_recall / (selected_precision + selected_recall + 1e-12)
-    print("target precision: {}, recall: {}, f1-score: {}, threshold: {}".format(selected_precision, selected_recall, target_f1, selected_threshold))
+    # 确保target_precision是list格式
+    if not isinstance(target_precision, list):
+        target_precision = [target_precision]
+    
+    # 存储所有选中的点
+    selected_points = []
+    
+    print("Target Precision Analysis:")
+    print("=" * 60)
+    
+    # 遍历每个目标precision
+    for i, target_p in enumerate(target_precision):
+        # find the threshold that gives the target precision
+        closest_precision_index = np.argmin(np.abs(precision - target_p))
+        selected_precision = precision[closest_precision_index]
+        selected_recall = recall[closest_precision_index]
+        selected_threshold = thresholds[closest_precision_index]
+        target_f1 = 2 * selected_precision * selected_recall / (selected_precision + selected_recall + 1e-12)
+        
+        # 存储点信息
+        selected_points.append({
+            'target_precision': target_p,
+            'actual_precision': selected_precision,
+            'recall': selected_recall,
+            'f1': target_f1,
+            'threshold': selected_threshold
+        })
+        
+        print("Target P={:.3f} -> Actual P={:.3f}, R={:.3f}, F1={:.3f}, Threshold={:.6f}".format(
+            target_p, selected_precision, selected_recall, target_f1, selected_threshold))
 
     plt.figure()
-    plt.plot(recall, precision, color='darkorange', lw=2, marker='o')
-    plt.scatter([selected_recall], [selected_precision], color='red', marker='x', s=100, label='Precision Point (P={:.2f}, R={:.2f})'.format(selected_precision, selected_recall))
-    plt.legend(loc="lower left")
-
+    plt.plot(recall, precision, color='darkorange', lw=2, marker='o', label='PR Curve')
+    
+    # 为每个选中的点画散点
+    colors = ['red', 'blue', 'green', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan', 'magenta']
+    for i, point in enumerate(selected_points):
+        color = colors[i % len(colors)]
+        marker = ['x', 'o', 's', '^', 'v', 'D', '*', '+', '<', '>'][i % 10]
+        plt.scatter([point['recall']], [point['actual_precision']], 
+                   color=color, marker=marker, s=100, 
+                   label='Target P={:.2f} (P={:.2f}, R={:.2f})'.format(
+                       point['target_precision'], point['actual_precision'], point['recall']))
+    
+    plt.legend(loc="lower left", fontsize=8)
     plt.xlabel('Recall')
     plt.ylabel('Precision')
     plt.title('Precision-Recall curve for {}'.format(word_py))
@@ -244,6 +276,8 @@ def plot_pr_curve_and_analysis(ref_score, hyp_score, test_result_dir, analysis_i
     plt.ylim([0.0, 1.05])
     plt_path = os.path.join(test_result_dir, 'unet.transformer_{}_pr.png'.format("{}-{}".format(analysis_id, word_py)))
     plt.savefig(plt_path, dpi=400)
+    
+    return selected_points
 
 def plot_sample_distribution(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
     assert len(ref_score) == len(hyp_score)
@@ -316,11 +350,12 @@ def result_analysis(result_label_score_path, is_gop=False, target_precision=0.21
         print(len(y_true), len(y_scores))
     analysis_id = "analysis" if not is_gop else "gop_analysis"
     plot_roc_curve(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all")
-    plot_pr_curve_and_analysis(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all", target_precision)
+    selected_points = plot_pr_curve_and_analysis(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all", target_precision)
     plot_sample_distribution(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all")
     compute_dcf(
         y_true, y_scores, cost_miss=1.0, cost_fa=1.0, prior_target=0.5, analysis_id=analysis_id
     )
+    return selected_points
 
 if __name__ == '__main__':
 

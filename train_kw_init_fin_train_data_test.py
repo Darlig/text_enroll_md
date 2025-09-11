@@ -529,7 +529,8 @@ class Trainer():
         model_dict = self.model.state_dict()
         pretrained_dict = ckpt_dict['model']
         pretrained_module_prefix = self.exp_config['finetune_config']['pretrained_module_prefix']
-        filtered_dict = {k: v for k, v in pretrained_dict.items() if self.need_to_load(k, pretrained_module_prefix)}
+        filtered_dict = {k: v for k, v in pretrained_dict.items()}
+        #filtered_dict = {k: v for k, v in pretrained_dict.items() if self.need_to_load(k, pretrained_module_prefix)}
         model_dict.update(filtered_dict)
         self.model.load_state_dict(model_dict)
 

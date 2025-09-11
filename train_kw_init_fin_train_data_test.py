@@ -667,7 +667,7 @@ class Trainer():
         torch.manual_seed(self.seed)
         torch.cuda.manual_seed(self.seed)
         self.model.to(self.device)
-        self.model.train()
+        self.model.eval()  # 设置为评估模式，确保不更新权重参数
         start_epoch = self.data_config['start_epoch']
         end_epoch = self.data_config['epoch']
         self.recorder.info("Start training the log is written in {}".format(
@@ -698,8 +698,9 @@ class Trainer():
                 train_data = (d.to(self.device) for d in data)
                 speech,speech_len,phn_label,phn_label_len,keyword,keyword_len,kw_spec_mask,target,target_len = train_data
                 train_data = (speech,speech_len,keyword,keyword_len,kw_spec_mask)
-                # 改为调用evaluate方法进行推理
-                det_result, hyp_result = self.model.evaluate(train_data)
+                # 改为调用evaluate方法进行推理，使用torch.no_grad()确保不计算梯度
+                with torch.no_grad():
+                    det_result, hyp_result = self.model.evaluate(train_data)
                 # print("det_result: ", det_result)
                 # print("phn_asr_hyp: ", phn_asr_hyp)
                 keyword = self.strip_special_token(keyword[0], target_level)

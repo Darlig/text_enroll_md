@@ -24,18 +24,30 @@ max_workers = int(sys.argv[8]) if len(sys.argv) > 8 else min(8, mp.cpu_count()) 
 #{"key": "Y0000003589_8WOJb2iiULs_S00222", "sph": "/work104/weiyang/data/wenetspeech/dataset/drama_samp500h/audio_cut3/audio/train/youtube_wav/B00014/Y0000003589_8WOJb2iiULs/Y0000003589_8WOJb2iiULs_S00222.wav", "bpe_label": [815, 47, 484, 13, 14, 1566, 754, 22, 1732, 1708, 765], "phn_label": [[64, 93], [58, 143], [32, 88], [20, 21], [22, 19], [7, 184], [10, 113], [3, 61], [44, 91], [72, 52], [64, 93]], "segment_label": [[[64, 93], [58, 143], [32, 88]], [[20, 21], [22, 19]], [[7, 184], [10, 113]], [[3, 61], [44, 91]], [[72, 52], [64, 93]]], "kw_candidate": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "b_kw_candidate": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
 
 datalist_dict = {}
+print(f"Reading source datalist from: {source_datalist}")
 with open(source_datalist) as f_datalist:
+    line_count = 0
     for line in f_datalist:
+        line_count += 1
+        if line_count % 10000 == 0:
+            print(f"  Processed {line_count} datalist entries...")
         utt_datalist_dict = json.loads(line.strip())
         uttid = utt_datalist_dict["key"]
         datalist_dict[uttid] = utt_datalist_dict
+print(f"Completed reading {len(datalist_dict)} datalist entries")
 
 c_timestamp_dict = {}
+print(f"Reading character timestamps from: {character_timestamp}")
 with open(character_timestamp) as f_timestamp:
+    line_count = 0
     for line in f_timestamp:
+        line_count += 1
+        if line_count % 10000 == 0:
+            print(f"  Processed {line_count} timestamp entries...")
         uttid, content = re.split(r'\s+', line.strip(), maxsplit=1)
         c_timestamp = ast.literal_eval(content)
         c_timestamp_dict[uttid] = c_timestamp
+print(f"Completed reading {len(c_timestamp_dict)} timestamp entries")
 
 def process_single_utterance_timestamp(args):
     """
@@ -66,6 +78,8 @@ def get_segment_timestamp(datalist_dict, c_timestamp_dict, max_workers=None):
     tasks = [(uttid, utt_datalist_dict, c_timestamp_dict) 
              for uttid, utt_datalist_dict in datalist_dict.items()]
     
+    print(f"Generating segment timestamps for {len(tasks)} utterances using {max_workers} workers...")
+    
     seg_timestamp_dict = {}
     
     if len(tasks) > 1 and max_workers > 1:
@@ -74,16 +88,25 @@ def get_segment_timestamp(datalist_dict, c_timestamp_dict, max_workers=None):
             results = list(executor.map(process_single_utterance_timestamp, tasks))
         
         # 收集结果
+        processed_count = 0
         for uttid, seg_timestamp_list in results:
+            processed_count += 1
+            if processed_count % 5000 == 0:
+                print(f"  Processed {processed_count}/{len(results)} timestamp generations...")
             if seg_timestamp_list is not None:
                 seg_timestamp_dict[uttid] = seg_timestamp_list
     else:
         # 串行处理（用于调试或小数据集）
+        processed_count = 0
         for task in tasks:
+            processed_count += 1
+            if processed_count % 1000 == 0:
+                print(f"  Processed {processed_count}/{len(tasks)} timestamp generations...")
             uttid, seg_timestamp_list = process_single_utterance_timestamp(task)
             if seg_timestamp_list is not None:
                 seg_timestamp_dict[uttid] = seg_timestamp_list
     
+    print(f"Completed segment timestamp generation for {len(seg_timestamp_dict)} utterances")
     return seg_timestamp_dict
 
 def get_segment_time_range(seg_timestamp, extension_ms=0, audio_duration_ms=None):
@@ -97,7 +120,7 @@ def get_segment_time_range(seg_timestamp, extension_ms=0, audio_duration_ms=None
     if not seg_timestamp:
         return 0, 0
     
-    print("seg_timestamp: {}".format(seg_timestamp))
+    # print("seg_timestamp: {}".format(seg_timestamp))
     original_start_time = seg_timestamp[0][0][0]  # 第一个元素的第一个值
     original_end_time = seg_timestamp[-1][-1][1]   # 最后一个元素的第二个值
     
@@ -140,11 +163,16 @@ def get_audio_duration_batch(audio_paths, max_workers=None):
     
     # 去重
     unique_paths = list(set(audio_paths))
+    print(f"Getting durations for {len(unique_paths)} unique audio files using {max_workers} workers...")
     
     if len(unique_paths) <= 1 or max_workers <= 1:
         # 串行处理
         duration_dict = {}
+        processed_count = 0
         for path in unique_paths:
+            processed_count += 1
+            if processed_count % 100 == 0:
+                print(f"  Processed duration for {processed_count}/{len(unique_paths)} audio files...")
             if os.path.exists(path):
                 duration_dict[path] = get_audio_duration_ms(path)
         return duration_dict
@@ -153,6 +181,7 @@ def get_audio_duration_batch(audio_paths, max_workers=None):
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # 只处理存在的文件
         existing_paths = [path for path in unique_paths if os.path.exists(path)]
+        print(f"  Found {len(existing_paths)} existing audio files out of {len(unique_paths)} unique paths")
         
         # 提交任务
         future_to_path = {executor.submit(get_audio_duration_ms, path): path 
@@ -160,8 +189,12 @@ def get_audio_duration_batch(audio_paths, max_workers=None):
         
         # 收集结果
         duration_dict = {}
+        completed_count = 0
         for future in future_to_path:
             path = future_to_path[future]
+            completed_count += 1
+            if completed_count % 500 == 0:
+                print(f"  Completed duration for {completed_count}/{len(existing_paths)} audio files...")
             try:
                 duration = future.result()
                 duration_dict[path] = duration
@@ -169,6 +202,7 @@ def get_audio_duration_batch(audio_paths, max_workers=None):
                 print(f"Error getting duration for {path}: {e}")
                 duration_dict[path] = None
     
+    print(f"Completed getting durations for {len(duration_dict)} audio files")
     return duration_dict
 
 def cut_audio_file(input_audio_path, output_audio_path, start_ms, end_ms):
@@ -306,8 +340,13 @@ def process_utterance_chunk(args):
     
     chunk_entries = []
     chunk_audio_tasks = []
+    processed_count = 0
     
     for uttid, utt_datalist_dict in chunk_data.items():
+        processed_count += 1
+        # 为避免过多输出，只在每个chunk的第一个元素时输出进度
+        if processed_count == 1:
+            print(f"  Processing chunk with {len(chunk_data)} utterances...")
         if uttid not in seg_timestamp_dict:
             continue
             
@@ -436,23 +475,50 @@ def split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_r
             chunk_results = list(executor.map(process_utterance_chunk, chunks))
         
         # 收集所有结果
+        processed_chunks = 0
         for chunk_entries, chunk_audio_tasks in chunk_results:
+            processed_chunks += 1
+            print(f"  Completed data processing for chunk {processed_chunks}/{len(chunks)}")
             cut_datalist_entries.extend(chunk_entries)
             audio_tasks.extend(chunk_audio_tasks)
     else:
         # 串行处理（用于小数据集或调试）
+        processed_chunks = 0
         for chunk in chunks:
+            processed_chunks += 1
+            print(f"  Processing chunk {processed_chunks}/{len(chunks)}...")
             chunk_entries, chunk_audio_tasks = process_utterance_chunk(chunk)
             cut_datalist_entries.extend(chunk_entries)
             audio_tasks.extend(chunk_audio_tasks)
     
+    print(f"Completed data processing. Generated {len(cut_datalist_entries)} entries and {len(audio_tasks)} audio tasks")
+    
     # 第二遍：并行处理音频切分
     if audio_tasks:
-        print(f"Processing {len(audio_tasks)} audio segments with {max_workers} workers...")
+        print(f"Starting audio cutting for {len(audio_tasks)} segments with {max_workers} workers...")
         start_time = time.time()
         
+        # 为了更好的进度输出，我们使用submit方式而不map，这样可以实时输出进度
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            results = list(executor.map(process_single_audio_segment, audio_tasks))
+            # 提交所有任务
+            futures = [executor.submit(process_single_audio_segment, task) for task in audio_tasks]
+            
+            # 收集结果并显示进度
+            results = []
+            completed_count = 0
+            for future in futures:
+                result = future.result()
+                results.append(result)
+                completed_count += 1
+                
+                # 每处理100个或者每10%输出一次进度
+                if completed_count % 100 == 0 or completed_count % max(1, len(audio_tasks) // 10) == 0:
+                    progress_percent = (completed_count / len(audio_tasks)) * 100
+                    elapsed_time = time.time() - start_time
+                    avg_time_per_task = elapsed_time / completed_count
+                    estimated_remaining = avg_time_per_task * (len(audio_tasks) - completed_count)
+                    print(f"  Audio cutting progress: {completed_count}/{len(audio_tasks)} ({progress_percent:.1f}%) - "
+                          f"Elapsed: {elapsed_time:.1f}s, ETA: {estimated_remaining:.1f}s")
         
         # 统计结果
         successful_cuts = sum(1 for r in results if r['success'])
@@ -471,20 +537,32 @@ def split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_r
     return cut_datalist_entries
 
 # 生成segment timestamp文件
-print(f"Generating segment timestamps using {max_workers} workers...")
+print(f"\n=== Step 1: Generating segment timestamps ===")
 with open(segment_timestamp, 'w') as f_seg_timestamp:
     seg_timestamp_dict = get_segment_timestamp(datalist_dict, c_timestamp_dict, max_workers)
+    print(f"Writing {len(seg_timestamp_dict)} segment timestamps to file...")
+    written_count = 0
     for uttid, seg_timestamp_list in seg_timestamp_dict.items():
         f_seg_timestamp.write("{} {}\n".format(uttid, seg_timestamp_list))
+        written_count += 1
+        if written_count % 10000 == 0:
+            print(f"  Written {written_count}/{len(seg_timestamp_dict)} timestamp entries...")
+print(f"Completed writing segment timestamps to: {segment_timestamp}")
 
 # 生成分割后的datalist文件
-print("Starting data processing...")
+print(f"\n=== Step 2: Processing datalist and cutting audio ===")
 start_time = time.time()
 
 with open(cut_datalist, 'w') as f_cut_datalist:
     cut_datalist_entries = split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_root, min_second_dim_length, audio_extension_ms, max_workers)
+    print(f"Writing {len(cut_datalist_entries)} datalist entries to file...")
+    written_count = 0
     for entry in cut_datalist_entries:
         f_cut_datalist.write(json.dumps(entry, ensure_ascii=False) + '\n')
+        written_count += 1
+        if written_count % 5000 == 0:
+            print(f"  Written {written_count}/{len(cut_datalist_entries)} datalist entries...")
+    print(f"Completed writing datalist to: {cut_datalist}")
 
 end_time = time.time()
 print(f"\n=== Processing Summary ===")

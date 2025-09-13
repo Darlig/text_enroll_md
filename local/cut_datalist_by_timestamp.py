@@ -19,6 +19,7 @@ output_audio_root = sys.argv[5]  # 新增：分割后音频文件的根目录
 min_second_dim_length = int(sys.argv[6]) if len(sys.argv) > 6 else 2  # 可配置的第二个维度长度阈值，默认为2
 audio_extension_ms = int(sys.argv[7]) if len(sys.argv) > 7 else 0  # 音频拓展长度（毫秒），默认为0
 max_workers = int(sys.argv[8]) if len(sys.argv) > 8 else min(8, mp.cpu_count())  # 并行处理的工作进程数，默认为CPU核心数
+skip_duration_check = (len(sys.argv) > 9 and sys.argv[9].lower() == 'true') or audio_extension_ms == 0  # 跳过音频时长检查，默认当extension_ms=0时跳过
 
 #1001501_26b0ce87 [[270, 450], [450, 490], [490, 590], [590, 650], [650, 730], [730, 770], [770, 830], [830, 890], [890, 930], [930, 990], [990, 1030], [1030, 1150], [1150, 1465]]
 #{"key": "Y0000003589_8WOJb2iiULs_S00222", "sph": "/work104/weiyang/data/wenetspeech/dataset/drama_samp500h/audio_cut3/audio/train/youtube_wav/B00014/Y0000003589_8WOJb2iiULs/Y0000003589_8WOJb2iiULs_S00222.wav", "bpe_label": [815, 47, 484, 13, 14, 1566, 754, 22, 1732, 1708, 765], "phn_label": [[64, 93], [58, 143], [32, 88], [20, 21], [22, 19], [7, 184], [10, 113], [3, 61], [44, 91], [72, 52], [64, 93]], "segment_label": [[[64, 93], [58, 143], [32, 88]], [[20, 21], [22, 19]], [[7, 184], [10, 113]], [[3, 61], [44, 91]], [[72, 52], [64, 93]]], "kw_candidate": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "b_kw_candidate": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
@@ -543,12 +544,13 @@ def process_utterance_chunk(args):
     
     return chunk_entries, chunk_audio_tasks
 
-def split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_root, min_second_dim_length=2, audio_extension_ms=0, max_workers=4):
+def split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_root, min_second_dim_length=2, audio_extension_ms=0, max_workers=4, skip_duration_check=True):
     """
     按照合并后的segment分割datalist，生成多个segment的datalist条目
     min_second_dim_length: 第二个维度长度阈值，默认为2
     audio_extension_ms: 音频拓展长度（毫秒），默认为0
     max_workers: 并行处理的工作进程数
+    skip_duration_check: 是否跳过音频时长检查，默认为True
     """
     cut_datalist_entries = []
     audio_tasks = []  # 存储音频切分任务
@@ -558,17 +560,22 @@ def split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_r
     
     print(f"Processing {len(datalist_dict)} utterances...")
     
-    # 第一步：收集所有需要获取时长的音频文件
-    all_audio_paths = []
-    for uttid, utt_datalist_dict in datalist_dict.items():
-        if uttid in seg_timestamp_dict:
-            original_sph = utt_datalist_dict["sph"]
-            if os.path.exists(original_sph):
-                all_audio_paths.append(original_sph)
-    
-    # 第二步：并行获取所有音频文件的时长
-    print(f"Getting duration for {len(set(all_audio_paths))} unique audio files...")
-    audio_duration_cache = get_audio_duration_batch(all_audio_paths, max_workers)
+    # 第一步：根据设置决定是否获取音频时长
+    if skip_duration_check:
+        print("Skipping audio duration check (extension_ms=0 or explicitly disabled)")
+        audio_duration_cache = {}
+    else:
+        # 收集所有需要获取时长的音频文件
+        all_audio_paths = []
+        for uttid, utt_datalist_dict in datalist_dict.items():
+            if uttid in seg_timestamp_dict:
+                original_sph = utt_datalist_dict["sph"]
+                if os.path.exists(original_sph):
+                    all_audio_paths.append(original_sph)
+        
+        # 并行获取所有音频文件的时长
+        print(f"Getting duration for {len(set(all_audio_paths))} unique audio files...")
+        audio_duration_cache = get_audio_duration_batch(all_audio_paths, max_workers)
     
     # 第三步：将数据分块并并行处理数据准备
     chunk_size = max(1, len(datalist_dict) // max_workers) if len(datalist_dict) > max_workers else len(datalist_dict)
@@ -668,7 +675,7 @@ print(f"\n=== Step 2: Processing datalist and cutting audio ===")
 start_time = time.time()
 
 with open(cut_datalist, 'w') as f_cut_datalist:
-    cut_datalist_entries = split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_root, min_second_dim_length, audio_extension_ms, max_workers)
+    cut_datalist_entries = split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_root, min_second_dim_length, audio_extension_ms, max_workers, skip_duration_check)
     print(f"Writing {len(cut_datalist_entries)} datalist entries to file...")
     written_count = 0
     for entry in cut_datalist_entries:
@@ -685,6 +692,7 @@ print(f"Generated {len(cut_datalist_entries)} segment entries in {cut_datalist}"
 print(f"Audio segments saved to: {output_audio_root}")
 print(f"Using minimum second dimension length threshold: {min_second_dim_length}")
 print(f"Using audio extension: {audio_extension_ms}ms")
+print(f"Audio duration check: {'Disabled' if skip_duration_check else 'Enabled'}")
 print(f"Using {max_workers} parallel workers")
 print("Audio cutting completed. Please ensure ffmpeg and ffprobe are installed for audio processing.")
 

@@ -6,6 +6,10 @@ import json
 import ast
 import os
 import subprocess
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+import time
+from functools import partial
 
 source_datalist = sys.argv[1]
 character_timestamp = sys.argv[2]
@@ -14,6 +18,7 @@ cut_datalist = sys.argv[4]
 output_audio_root = sys.argv[5]  # 新增：分割后音频文件的根目录
 min_second_dim_length = int(sys.argv[6]) if len(sys.argv) > 6 else 2  # 可配置的第二个维度长度阈值，默认为2
 audio_extension_ms = int(sys.argv[7]) if len(sys.argv) > 7 else 0  # 音频拓展长度（毫秒），默认为0
+max_workers = int(sys.argv[8]) if len(sys.argv) > 8 else min(8, mp.cpu_count())  # 并行处理的工作进程数，默认为CPU核心数
 
 #1001501_26b0ce87 [[270, 450], [450, 490], [490, 590], [590, 650], [650, 730], [730, 770], [770, 830], [830, 890], [890, 930], [930, 990], [990, 1030], [1030, 1150], [1150, 1465]]
 #{"key": "Y0000003589_8WOJb2iiULs_S00222", "sph": "/work104/weiyang/data/wenetspeech/dataset/drama_samp500h/audio_cut3/audio/train/youtube_wav/B00014/Y0000003589_8WOJb2iiULs/Y0000003589_8WOJb2iiULs_S00222.wav", "bpe_label": [815, 47, 484, 13, 14, 1566, 754, 22, 1732, 1708, 765], "phn_label": [[64, 93], [58, 143], [32, 88], [20, 21], [22, 19], [7, 184], [10, 113], [3, 61], [44, 91], [72, 52], [64, 93]], "segment_label": [[[64, 93], [58, 143], [32, 88]], [[20, 21], [22, 19]], [[7, 184], [10, 113]], [[3, 61], [44, 91]], [[72, 52], [64, 93]]], "kw_candidate": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "b_kw_candidate": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
@@ -98,7 +103,6 @@ def cut_audio_file(input_audio_path, output_audio_path, start_ms, end_ms):
     使用ffmpeg切分音频文件
     start_ms, end_ms: 起止时间（毫秒）
     """
-    print("start_ms: ", start_ms, "end_ms: ", end_ms)
     try:
         # 将毫秒转换为秒
         start_sec = start_ms / 1000.0
@@ -122,6 +126,26 @@ def cut_audio_file(input_audio_path, output_audio_path, start_ms, end_ms):
     except Exception as e:
         print(f"Error cutting audio {input_audio_path}: {e}")
         return False
+
+def process_single_audio_segment(args):
+    """
+    处理单个音频segment的切分
+    用于并行处理
+    """
+    (input_audio_path, output_audio_path, start_ms, end_ms, uttid, seg_idx) = args
+    
+    # 确保输出目录存在
+    os.makedirs(os.path.dirname(output_audio_path), exist_ok=True)
+    
+    # 切分音频
+    success = cut_audio_file(input_audio_path, output_audio_path, start_ms, end_ms)
+    
+    return {
+        'uttid': uttid,
+        'seg_idx': seg_idx,
+        'success': success,
+        'output_path': output_audio_path
+    }
 
 def generate_output_audio_path(uttid, seg_idx, start_ms, end_ms, output_root):
     """
@@ -201,17 +225,23 @@ def merge_segments_by_second_dimension(segment_label, seg_timestamp_list, min_se
     
     return merged_segments
 
-def split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_root, min_second_dim_length=2, audio_extension_ms=0):
+def split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_root, min_second_dim_length=2, audio_extension_ms=0, max_workers=4):
     """
     按照合并后的segment分割datalist，生成多个segment的datalist条目
     min_second_dim_length: 第二个维度长度阈值，默认为2
     audio_extension_ms: 音频拓展长度（毫秒），默认为0
+    max_workers: 并行处理的工作进程数
     """
     cut_datalist_entries = []
+    audio_tasks = []  # 存储音频切分任务
+    audio_duration_cache = {}  # 缓存音频时长，避免重复获取
     
     # 确保输出根目录存在
     os.makedirs(output_audio_root, exist_ok=True)
     
+    print(f"Processing {len(datalist_dict)} utterances...")
+    
+    # 第一遍：准备所有任务和数据
     for uttid, utt_datalist_dict in datalist_dict.items():
         if uttid not in seg_timestamp_dict:
             continue
@@ -229,12 +259,14 @@ def split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_r
         # 创建合并的segments
         merged_segments = merge_segments_by_second_dimension(segment_label, seg_timestamp_list, min_second_dim_length)
         
-        # 获取音频文件时长（用于边界处理）
+        # 获取音频文件时长（用于边界处理），使用缓存避免重复获取
         audio_duration_ms = None
         if os.path.exists(original_sph):
-            audio_duration_ms = get_audio_duration_ms(original_sph)
+            if original_sph not in audio_duration_cache:
+                audio_duration_cache[original_sph] = get_audio_duration_ms(original_sph)
+            audio_duration_ms = audio_duration_cache[original_sph]
         
-        # 为每个合并的segment创建一个新的datalist条目
+        # 为每个合并的segment准备数据
         for seg_idx, (merged_segment_label, merged_timestamp, start_idx, end_idx) in enumerate(merged_segments):
             # 计算合并segment的总长度（所有内部数组长度之和）
             total_length = sum(sum(len(inner_list) for inner_list in seg) for seg in merged_segment_label)
@@ -257,11 +289,9 @@ def split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_r
             new_sph = generate_output_audio_path(uttid, seg_idx, start_ms, end_ms, output_audio_root)
             new_entry["sph"] = new_sph
             
-            # 切分音频文件
+            # 准备音频切分任务
             if os.path.exists(original_sph):
-                success = cut_audio_file(original_sph, new_sph, start_ms, end_ms)
-                if not success:
-                    print(f"Failed to cut audio for {uttid} segment {seg_idx}")
+                audio_tasks.append((original_sph, new_sph, start_ms, end_ms, uttid, seg_idx))
             else:
                 print(f"Warning: Original audio file not found: {original_sph}")
             
@@ -297,6 +327,28 @@ def split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_r
             
             cut_datalist_entries.append(new_entry)
     
+    # 第二遍：并行处理音频切分
+    if audio_tasks:
+        print(f"Processing {len(audio_tasks)} audio segments with {max_workers} workers...")
+        start_time = time.time()
+        
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(process_single_audio_segment, audio_tasks))
+        
+        # 统计结果
+        successful_cuts = sum(1 for r in results if r['success'])
+        failed_cuts = len(results) - successful_cuts
+        
+        end_time = time.time()
+        print(f"Audio processing completed in {end_time - start_time:.2f} seconds")
+        print(f"Successfully cut {successful_cuts} segments, failed {failed_cuts} segments")
+        
+        if failed_cuts > 0:
+            print("Failed segments:")
+            for r in results:
+                if not r['success']:
+                    print(f"  {r['uttid']} segment {r['seg_idx']}")
+    
     return cut_datalist_entries
 
 # 生成segment timestamp文件
@@ -306,15 +358,22 @@ with open(segment_timestamp, 'w') as f_seg_timestamp:
         f_seg_timestamp.write("{} {}\n".format(uttid, seg_timestamp_list))
 
 # 生成分割后的datalist文件
+print("Starting data processing...")
+start_time = time.time()
+
 with open(cut_datalist, 'w') as f_cut_datalist:
-    cut_datalist_entries = split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_root, min_second_dim_length, audio_extension_ms)
+    cut_datalist_entries = split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_root, min_second_dim_length, audio_extension_ms, max_workers)
     for entry in cut_datalist_entries:
         f_cut_datalist.write(json.dumps(entry, ensure_ascii=False) + '\n')
 
+end_time = time.time()
+print(f"\n=== Processing Summary ===")
+print(f"Total processing time: {end_time - start_time:.2f} seconds")
 print(f"Generated {len(cut_datalist_entries)} segment entries in {cut_datalist}")
 print(f"Audio segments saved to: {output_audio_root}")
 print(f"Using minimum second dimension length threshold: {min_second_dim_length}")
 print(f"Using audio extension: {audio_extension_ms}ms")
+print(f"Using {max_workers} parallel workers")
 print("Audio cutting completed. Please ensure ffmpeg and ffprobe are installed for audio processing.")
 
 

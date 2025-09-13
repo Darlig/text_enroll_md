@@ -37,20 +37,53 @@ with open(character_timestamp) as f_timestamp:
         c_timestamp = ast.literal_eval(content)
         c_timestamp_dict[uttid] = c_timestamp
 
-def get_segment_timestamp(datalist_dict, c_timestamp_dict):
+def process_single_utterance_timestamp(args):
+    """
+    处理单个utterance的timestamp生成，用于并行处理
+    """
+    uttid, utt_datalist_dict, c_timestamp_dict = args
+    if uttid in c_timestamp_dict:
+        c_timestamp = c_timestamp_dict[uttid]
+        segment_label = utt_datalist_dict["segment_label"]
+        seg_len_list = [len(seg) for seg in segment_label]
+        seg_timestamp_list = []
+        i = 0
+        for sl in seg_len_list:
+            seg_ts = c_timestamp[i:i+sl]
+            seg_timestamp_list.append(seg_ts)
+            i += sl
+        return uttid, seg_timestamp_list
+    return uttid, None
+
+def get_segment_timestamp(datalist_dict, c_timestamp_dict, max_workers=None):
+    """
+    并行处理segment timestamp生成
+    """
+    if max_workers is None:
+        max_workers = min(8, mp.cpu_count())
+    
+    # 准备任务参数
+    tasks = [(uttid, utt_datalist_dict, c_timestamp_dict) 
+             for uttid, utt_datalist_dict in datalist_dict.items()]
+    
     seg_timestamp_dict = {}
-    for uttid, utt_datalist_dict in datalist_dict.items():
-        if uttid in c_timestamp_dict:
-            c_timestamp = c_timestamp_dict[uttid]
-            segment_label = utt_datalist_dict["segment_label"]
-            seg_len_list = [ len(seg) for seg in segment_label ]
-            seg_timestamp_list = []
-            i = 0
-            for sl in seg_len_list:
-                seg_ts = c_timestamp[i:i+sl]
-                seg_timestamp_list.append(seg_ts)
-                i += sl
-            seg_timestamp_dict[uttid] = seg_timestamp_list
+    
+    if len(tasks) > 1 and max_workers > 1:
+        # 使用进程池并行处理
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(process_single_utterance_timestamp, tasks))
+        
+        # 收集结果
+        for uttid, seg_timestamp_list in results:
+            if seg_timestamp_list is not None:
+                seg_timestamp_dict[uttid] = seg_timestamp_list
+    else:
+        # 串行处理（用于调试或小数据集）
+        for task in tasks:
+            uttid, seg_timestamp_list = process_single_utterance_timestamp(task)
+            if seg_timestamp_list is not None:
+                seg_timestamp_dict[uttid] = seg_timestamp_list
+    
     return seg_timestamp_dict
 
 def get_segment_time_range(seg_timestamp, extension_ms=0, audio_duration_ms=None):
@@ -97,6 +130,46 @@ def get_audio_duration_ms(input_audio_path):
     except Exception as e:
         print(f"Error getting duration for {input_audio_path}: {e}")
         return None
+
+def get_audio_duration_batch(audio_paths, max_workers=None):
+    """
+    并行获取多个音频文件的时长
+    """
+    if max_workers is None:
+        max_workers = min(8, mp.cpu_count())
+    
+    # 去重
+    unique_paths = list(set(audio_paths))
+    
+    if len(unique_paths) <= 1 or max_workers <= 1:
+        # 串行处理
+        duration_dict = {}
+        for path in unique_paths:
+            if os.path.exists(path):
+                duration_dict[path] = get_audio_duration_ms(path)
+        return duration_dict
+    
+    # 并行处理
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 只处理存在的文件
+        existing_paths = [path for path in unique_paths if os.path.exists(path)]
+        
+        # 提交任务
+        future_to_path = {executor.submit(get_audio_duration_ms, path): path 
+                         for path in existing_paths}
+        
+        # 收集结果
+        duration_dict = {}
+        for future in future_to_path:
+            path = future_to_path[future]
+            try:
+                duration = future.result()
+                duration_dict[path] = duration
+            except Exception as e:
+                print(f"Error getting duration for {path}: {e}")
+                duration_dict[path] = None
+    
+    return duration_dict
 
 def cut_audio_file(input_audio_path, output_audio_path, start_ms, end_ms):
     """
@@ -225,24 +298,16 @@ def merge_segments_by_second_dimension(segment_label, seg_timestamp_list, min_se
     
     return merged_segments
 
-def split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_root, min_second_dim_length=2, audio_extension_ms=0, max_workers=4):
+def process_utterance_chunk(args):
     """
-    按照合并后的segment分割datalist，生成多个segment的datalist条目
-    min_second_dim_length: 第二个维度长度阈值，默认为2
-    audio_extension_ms: 音频拓展长度（毫秒），默认为0
-    max_workers: 并行处理的工作进程数
+    处理一批utterance的数据准备，用于并行处理
     """
-    cut_datalist_entries = []
-    audio_tasks = []  # 存储音频切分任务
-    audio_duration_cache = {}  # 缓存音频时长，避免重复获取
+    chunk_data, seg_timestamp_dict, audio_duration_cache, min_second_dim_length, audio_extension_ms, output_audio_root = args
     
-    # 确保输出根目录存在
-    os.makedirs(output_audio_root, exist_ok=True)
+    chunk_entries = []
+    chunk_audio_tasks = []
     
-    print(f"Processing {len(datalist_dict)} utterances...")
-    
-    # 第一遍：准备所有任务和数据
-    for uttid, utt_datalist_dict in datalist_dict.items():
+    for uttid, utt_datalist_dict in chunk_data.items():
         if uttid not in seg_timestamp_dict:
             continue
             
@@ -259,12 +324,8 @@ def split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_r
         # 创建合并的segments
         merged_segments = merge_segments_by_second_dimension(segment_label, seg_timestamp_list, min_second_dim_length)
         
-        # 获取音频文件时长（用于边界处理），使用缓存避免重复获取
-        audio_duration_ms = None
-        if os.path.exists(original_sph):
-            if original_sph not in audio_duration_cache:
-                audio_duration_cache[original_sph] = get_audio_duration_ms(original_sph)
-            audio_duration_ms = audio_duration_cache[original_sph]
+        # 从缓存中获取音频文件时长
+        audio_duration_ms = audio_duration_cache.get(original_sph)
         
         # 为每个合并的segment准备数据
         for seg_idx, (merged_segment_label, merged_timestamp, start_idx, end_idx) in enumerate(merged_segments):
@@ -291,7 +352,7 @@ def split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_r
             
             # 准备音频切分任务
             if os.path.exists(original_sph):
-                audio_tasks.append((original_sph, new_sph, start_ms, end_ms, uttid, seg_idx))
+                chunk_audio_tasks.append((original_sph, new_sph, start_ms, end_ms, uttid, seg_idx))
             else:
                 print(f"Warning: Original audio file not found: {original_sph}")
             
@@ -325,7 +386,65 @@ def split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_r
             new_entry["total_length"] = total_length
             new_entry["original_segment_range"] = f"{start_idx}-{end_idx-1}"
             
-            cut_datalist_entries.append(new_entry)
+            chunk_entries.append(new_entry)
+    
+    return chunk_entries, chunk_audio_tasks
+
+def split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_root, min_second_dim_length=2, audio_extension_ms=0, max_workers=4):
+    """
+    按照合并后的segment分割datalist，生成多个segment的datalist条目
+    min_second_dim_length: 第二个维度长度阈值，默认为2
+    audio_extension_ms: 音频拓展长度（毫秒），默认为0
+    max_workers: 并行处理的工作进程数
+    """
+    cut_datalist_entries = []
+    audio_tasks = []  # 存储音频切分任务
+    
+    # 确保输出根目录存在
+    os.makedirs(output_audio_root, exist_ok=True)
+    
+    print(f"Processing {len(datalist_dict)} utterances...")
+    
+    # 第一步：收集所有需要获取时长的音频文件
+    all_audio_paths = []
+    for uttid, utt_datalist_dict in datalist_dict.items():
+        if uttid in seg_timestamp_dict:
+            original_sph = utt_datalist_dict["sph"]
+            if os.path.exists(original_sph):
+                all_audio_paths.append(original_sph)
+    
+    # 第二步：并行获取所有音频文件的时长
+    print(f"Getting duration for {len(set(all_audio_paths))} unique audio files...")
+    audio_duration_cache = get_audio_duration_batch(all_audio_paths, max_workers)
+    
+    # 第三步：将数据分块并并行处理数据准备
+    chunk_size = max(1, len(datalist_dict) // max_workers) if len(datalist_dict) > max_workers else len(datalist_dict)
+    
+    # 将数据分成chunks
+    datalist_items = list(datalist_dict.items())
+    chunks = []
+    for i in range(0, len(datalist_items), chunk_size):
+        chunk_dict = dict(datalist_items[i:i + chunk_size])
+        chunks.append((chunk_dict, seg_timestamp_dict, audio_duration_cache, 
+                      min_second_dim_length, audio_extension_ms, output_audio_root))
+    
+    print(f"Processing data in {len(chunks)} chunks with {max_workers} workers...")
+    
+    if len(chunks) > 1 and max_workers > 1:
+        # 并行处理数据准备
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            chunk_results = list(executor.map(process_utterance_chunk, chunks))
+        
+        # 收集所有结果
+        for chunk_entries, chunk_audio_tasks in chunk_results:
+            cut_datalist_entries.extend(chunk_entries)
+            audio_tasks.extend(chunk_audio_tasks)
+    else:
+        # 串行处理（用于小数据集或调试）
+        for chunk in chunks:
+            chunk_entries, chunk_audio_tasks = process_utterance_chunk(chunk)
+            cut_datalist_entries.extend(chunk_entries)
+            audio_tasks.extend(chunk_audio_tasks)
     
     # 第二遍：并行处理音频切分
     if audio_tasks:
@@ -352,8 +471,9 @@ def split_datalist_by_segments(datalist_dict, seg_timestamp_dict, output_audio_r
     return cut_datalist_entries
 
 # 生成segment timestamp文件
+print(f"Generating segment timestamps using {max_workers} workers...")
 with open(segment_timestamp, 'w') as f_seg_timestamp:
-    seg_timestamp_dict = get_segment_timestamp(datalist_dict, c_timestamp_dict)
+    seg_timestamp_dict = get_segment_timestamp(datalist_dict, c_timestamp_dict, max_workers)
     for uttid, seg_timestamp_list in seg_timestamp_dict.items():
         f_seg_timestamp.write("{} {}\n".format(uttid, seg_timestamp_list))
 

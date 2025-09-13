@@ -67,43 +67,157 @@ def process_single_utterance_timestamp(args):
         return uttid, seg_timestamp_list
     return uttid, None
 
+def process_utterance_batch_timestamp(args):
+    """
+    批量处理多个utterance的timestamp生成，减少进程间通信开销
+    """
+    batch_tasks, c_timestamp_dict = args
+    batch_results = []
+    
+    for uttid, utt_datalist_dict in batch_tasks:
+        if uttid in c_timestamp_dict:
+            c_timestamp = c_timestamp_dict[uttid]
+            segment_label = utt_datalist_dict["segment_label"]
+            seg_len_list = [len(seg) for seg in segment_label]
+            seg_timestamp_list = []
+            i = 0
+            for sl in seg_len_list:
+                seg_ts = c_timestamp[i:i+sl]
+                seg_timestamp_list.append(seg_ts)
+                i += sl
+            batch_results.append((uttid, seg_timestamp_list))
+        else:
+            batch_results.append((uttid, None))
+    
+    return batch_results
+
 def get_segment_timestamp(datalist_dict, c_timestamp_dict, max_workers=None):
     """
-    并行处理segment timestamp生成
+    并行处理segment timestamp生成（智能优化版本）
     """
     if max_workers is None:
         max_workers = min(8, mp.cpu_count())
     
-    # 准备任务参数
-    tasks = [(uttid, utt_datalist_dict, c_timestamp_dict) 
-             for uttid, utt_datalist_dict in datalist_dict.items()]
+    datalist_items = list(datalist_dict.items())
+    total_tasks = len(datalist_items)
     
-    print(f"Generating segment timestamps for {len(tasks)} utterances using {max_workers} workers...")
+    print(f"Generating segment timestamps for {total_tasks} utterances using {max_workers} workers...")
     
     seg_timestamp_dict = {}
     
-    if len(tasks) > 1 and max_workers > 1:
-        # 使用进程池并行处理
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            results = list(executor.map(process_single_utterance_timestamp, tasks))
-        
-        # 收集结果
-        processed_count = 0
-        for uttid, seg_timestamp_list in results:
-            processed_count += 1
-            if processed_count % 5000 == 0:
-                print(f"  Processed {processed_count}/{len(results)} timestamp generations...")
-            if seg_timestamp_list is not None:
-                seg_timestamp_dict[uttid] = seg_timestamp_list
+    if total_tasks > 1 and max_workers > 1:
+        # 根据任务数量选择处理策略
+        if total_tasks > 5000:
+            # 大量任务：使用批处理减少进程间通信开销
+            batch_size = max(50, total_tasks // (max_workers * 4))
+            print(f"  Using batch processing (batch size: {batch_size}) for large dataset...")
+            
+            # 创建批次
+            batches = []
+            for i in range(0, total_tasks, batch_size):
+                batch_tasks = datalist_items[i:i + batch_size]
+                batches.append((batch_tasks, c_timestamp_dict))
+            
+            print(f"  Created {len(batches)} batches for processing")
+            start_time = time.time()
+            
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                # 使用submit方式提交批次任务
+                future_to_batch = {executor.submit(process_utterance_batch_timestamp, batch): i 
+                                 for i, batch in enumerate(batches)}
+                
+                # 实时收集结果并显示进度
+                processed_batches = 0
+                processed_utterances = 0
+                
+                for future in future_to_batch:
+                    try:
+                        batch_results = future.result(timeout=120)  # 批处理超时时间更长
+                        processed_batches += 1
+                        
+                        # 处理批次结果
+                        for uttid, seg_timestamp_list in batch_results:
+                            processed_utterances += 1
+                            if seg_timestamp_list is not None:
+                                seg_timestamp_dict[uttid] = seg_timestamp_list
+                        
+                        # 显示进度
+                        if processed_batches % max(1, len(batches) // 20) == 0 or processed_batches == len(batches):
+                            elapsed_time = time.time() - start_time
+                            progress_percent = (processed_batches / len(batches)) * 100
+                            avg_time_per_batch = elapsed_time / processed_batches
+                            estimated_remaining = avg_time_per_batch * (len(batches) - processed_batches)
+                            
+                            print(f"  Progress: {processed_batches}/{len(batches)} batches ({progress_percent:.1f}%) - "
+                                  f"Processed {processed_utterances} utterances - "
+                                  f"Elapsed: {elapsed_time:.1f}s, ETA: {estimated_remaining:.1f}s, "
+                                  f"Speed: {processed_utterances/elapsed_time:.1f} utterances/sec")
+                            
+                    except Exception as e:
+                        batch_idx = future_to_batch[future]
+                        print(f"  Warning: Batch {batch_idx} failed with error: {e}")
+                        processed_batches += 1
+        else:
+            # 中等任务量：使用单任务处理方式
+            print(f"  Using individual task processing for medium dataset...")
+            tasks = [(uttid, utt_datalist_dict, c_timestamp_dict) 
+                     for uttid, utt_datalist_dict in datalist_items]
+            start_time = time.time()
+            
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                # 使用submit方式提交任务，可以实时获取结果
+                future_to_task = {executor.submit(process_single_utterance_timestamp, task): i 
+                                 for i, task in enumerate(tasks)}
+                
+                # 实时收集结果并显示进度
+                processed_count = 0
+                for future in future_to_task:
+                    try:
+                        uttid, seg_timestamp_list = future.result(timeout=60)  # 60秒超时
+                        processed_count += 1
+                        
+                        if seg_timestamp_list is not None:
+                            seg_timestamp_dict[uttid] = seg_timestamp_list
+                        
+                        # 显示详细进度信息
+                        if processed_count % 500 == 0 or processed_count % max(1, len(tasks) // 20) == 0:
+                            elapsed_time = time.time() - start_time
+                            progress_percent = (processed_count / len(tasks)) * 100
+                            avg_time_per_task = elapsed_time / processed_count
+                            estimated_remaining = avg_time_per_task * (len(tasks) - processed_count)
+                            
+                            print(f"  Progress: {processed_count}/{len(tasks)} ({progress_percent:.1f}%) - "
+                                  f"Elapsed: {elapsed_time:.1f}s, ETA: {estimated_remaining:.1f}s, "
+                                  f"Speed: {processed_count/elapsed_time:.1f} tasks/sec")
+                            
+                    except Exception as e:
+                        task_idx = future_to_task[future]
+                        print(f"  Warning: Task {task_idx} failed with error: {e}")
+                        processed_count += 1
     else:
         # 串行处理（用于调试或小数据集）
+        print(f"  Using serial processing for small dataset...")
         processed_count = 0
-        for task in tasks:
+        start_time = time.time()
+        for uttid, utt_datalist_dict in datalist_items:
             processed_count += 1
             if processed_count % 1000 == 0:
-                print(f"  Processed {processed_count}/{len(tasks)} timestamp generations...")
-            uttid, seg_timestamp_list = process_single_utterance_timestamp(task)
-            if seg_timestamp_list is not None:
+                elapsed_time = time.time() - start_time
+                avg_time = elapsed_time / processed_count
+                eta = avg_time * (total_tasks - processed_count)
+                print(f"  Processed {processed_count}/{total_tasks} timestamp generations... "
+                      f"Elapsed: {elapsed_time:.1f}s, ETA: {eta:.1f}s")
+            
+            if uttid in c_timestamp_dict:
+                c_timestamp = c_timestamp_dict[uttid]
+                segment_label = utt_datalist_dict["segment_label"]
+                seg_len_list = [len(seg) for seg in segment_label]
+                seg_timestamp_list = []
+                i = 0
+                for sl in seg_len_list:
+                    seg_ts = c_timestamp[i:i+sl]
+                    seg_timestamp_list.append(seg_ts)
+                    i += sl
                 seg_timestamp_dict[uttid] = seg_timestamp_list
     
     print(f"Completed segment timestamp generation for {len(seg_timestamp_dict)} utterances")

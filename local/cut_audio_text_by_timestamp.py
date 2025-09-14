@@ -9,17 +9,19 @@ import re
 import ast
 
 class AudioSegmentationTool:
-    def __init__(self, datalist_path: str, timestamp_path: str, output_dir: str = "output_segments"):
+    def __init__(self, datalist_path: str, timestamp_path: str, text_path: str = None, output_dir: str = "output_segments"):
         """
         初始化音频切割工具
         
         Args:
             datalist_path: 包含分词信息的datalist.txt文件路径
             timestamp_path: 包含时间戳信息的timestamp.txt文件路径
+            text_path: 包含音频文本的文件路径（可选）
             output_dir: 输出目录
         """
         self.datalist_path = datalist_path
         self.timestamp_path = timestamp_path
+        self.text_path = text_path
         self.output_dir = output_dir
         
         # 创建输出目录
@@ -28,6 +30,7 @@ class AudioSegmentationTool:
         # 加载数据
         self.datalist = self._load_datalist()
         self.timestamps = self._load_timestamps()
+        self.text_data = self._load_text_data() if text_path else {}
         
     def _load_datalist(self) -> Dict[str, Any]:
         """加载分词信息"""
@@ -60,6 +63,27 @@ class AudioSegmentationTool:
                     timestamp_data = parts[1]
                     timestamps[key] = ast.literal_eval(timestamp_data)
         return timestamps
+    
+    def _load_text_data(self) -> Dict[str, str]:
+        """
+        加载音频文本数据
+        
+        文件格式：每行为 "uttid 示例文本内容"
+        
+        Returns:
+            字典，key为uttid，value为对应的文本内容
+        """
+        text_data = {}
+        with open(self.text_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    # 分割uttid和文本内容，只分割第一个空格
+                    parts = line.split(' ', 1)
+                    if len(parts) == 2:
+                        uttid, text_content = parts
+                        text_data[uttid] = text_content
+        return text_data
     
     def _calculate_word_character_count(self, segment_label: List[List[List[int]]]) -> List[int]:
         """
@@ -114,6 +138,40 @@ class AudioSegmentationTool:
                 groups[-1] = (second_last_start, last_group_end)
             
         return groups
+    
+    def _extract_text_segment(self, full_text: str, segment_label: List[List[List[int]]], 
+                            start_word: int, end_word: int) -> str:
+        """
+        从完整文本中提取对应片段的文本
+        
+        Args:
+            full_text: 完整的文本内容
+            segment_label: 分词信息
+            start_word: 起始词索引
+            end_word: 结束词索引
+            
+        Returns:
+            提取的文本片段
+        """
+        if not full_text:
+            return ""
+        
+        # 计算片段包含的总字数
+        total_chars = sum(len(segment_label[i]) for i in range(start_word, end_word + 1))
+        
+        # 计算起始字符位置
+        start_char_pos = sum(len(segment_label[i]) for i in range(start_word))
+        
+        # 提取对应的文本片段
+        end_char_pos = start_char_pos + total_chars
+        
+        # 确保不超出文本边界
+        if start_char_pos < len(full_text) and end_char_pos <= len(full_text):
+            return full_text[start_char_pos:end_char_pos]
+        elif start_char_pos < len(full_text):
+            return full_text[start_char_pos:]
+        else:
+            return ""
     
     def _calculate_segment_timestamps(self, segment_label: List[List[List[int]]], 
                                     timestamps: List[List[int]], 
@@ -202,6 +260,9 @@ class AudioSegmentationTool:
         cut_info = []
         audio_duration_ms = len(audio) / sr * 1000  # 音频总时长（毫秒）
         
+        # 获取完整文本（如果有的话）
+        full_text = self.text_data.get(audio_key, "")
+        
         for i, ((start_word, end_word), (start_time, end_time)) in enumerate(zip(word_groups, segment_timestamps)):
             # 应用延伸时间
             extended_start_time = max(0, start_time - extend_before_ms)
@@ -239,6 +300,9 @@ class AudioSegmentationTool:
                     })
                     char_count += word_chars
                 
+                # 提取对应的文本片段
+                text_segment = self._extract_text_segment(full_text, segment_label, start_word, end_word)
+                
                 segment_info = {
                     'segment_id': i,
                     'filename': output_filename,
@@ -246,6 +310,7 @@ class AudioSegmentationTool:
                     'word_range': (start_word, end_word),
                     'words_info': words_in_segment,
                     'total_chars': char_count,
+                    'text_segment': text_segment,  # 添加文本片段
                     'original_time_range_ms': (start_time, end_time),
                     'extended_time_range_ms': (extended_start_time, extended_end_time),
                     'original_time_range_sec': (start_sec, end_sec),
@@ -299,6 +364,23 @@ class AudioSegmentationTool:
         with open(info_path, 'w', encoding='utf-8') as f:
             json.dump(cut_info, f, ensure_ascii=False, indent=2)
         print(f"切割信息已保存到: {info_path}")
+    
+    def save_text_segments(self, cut_info: Dict[str, List[Dict[str, Any]]], text_filename: str = "text_segments.txt"):
+        """
+        保存文本片段到文本文件
+        
+        Args:
+            cut_info: 切割信息
+            text_filename: 文本文件名
+        """
+        text_path = os.path.join(self.output_dir, text_filename)
+        with open(text_path, 'w', encoding='utf-8') as f:
+            for audio_key, segments in cut_info.items():
+                for segment in segments:
+                    segment_filename = segment['filename'].replace('.wav', '')
+                    text_segment = segment.get('text_segment', '')
+                    f.write(f"{segment_filename} {text_segment}\n")
+        print(f"文本片段已保存到: {text_path}")
 
 
 def main():
@@ -306,13 +388,13 @@ def main():
     使用示例
     
     命令行参数:
-    python script.py datalist_path timestamp_path output_dir threshold [extend_before_ms] [extend_after_ms]
+    python script.py datalist_path timestamp_path text_path output_dir threshold [extend_before_ms] [extend_after_ms]
     
     例如:
-    python script.py datalist.txt timestamp.txt output 6 100 200
+    python script.py datalist.txt timestamp.txt text.txt output 6 100 100
     - 字数阈值: 6
     - 前延伸: 100毫秒
-    - 后延伸: 200毫秒
+    - 后延伸: 100毫秒
     """
     # 配置文件路径
     #datalist_path = "datalist.txt"
@@ -320,47 +402,52 @@ def main():
     #output_dir = "output_segments"
     datalist_path = sys.argv[1]
     timestamp_path = sys.argv[2]
-    output_dir = sys.argv[3]
-    threshold = int(sys.argv[4])
-    extend_before_ms = int(sys.argv[5]) if len(sys.argv) > 5 else 0
-    extend_after_ms = int(sys.argv[6]) if len(sys.argv) > 6 else 0
+    text_path = sys.argv[3]
+    output_dir = sys.argv[4]
+    threshold = int(sys.argv[5])
+    extend_before_ms = int(sys.argv[6]) if len(sys.argv) > 6 else 0
+    extend_after_ms = int(sys.argv[7]) if len(sys.argv) > 7 else 0
     
     # 创建切割工具
-    tool = AudioSegmentationTool(datalist_path, timestamp_path, output_dir)
+    tool = AudioSegmentationTool(datalist_path, timestamp_path, text_path, output_dir)
     
     # # 设置字数阈值
     # threshold = 6
     
-    # # 方式1: 切割单个音频
-    # try:
-    #     audio_key = "1001501_26b0ce87"  # 指定要切割的音频key
-    #     cut_info = tool.cut_audio(audio_key, threshold)
-    #     print(f"音频 {audio_key} 切割完成，共 {len(cut_info)} 个片段")
-        
-    #     # 打印切割信息
-    #     for segment in cut_info:
-    #         print(f"  片段 {segment['segment_id']}: {segment['filename']}")
-    #         print(f"    词范围: {segment['word_range']}")
-    #         print(f"    字数: {segment['total_chars']}")
-    #         print(f"    时长: {segment['duration_sec']:.2f}秒")
-    # except Exception as e:
-    #     print(f"切割单个音频失败: {e}")
-    
     # 方式2: 切割所有音频
     print("\n开始切割所有音频...")
     print(f"配置参数: 字数阈值={threshold}, 前延伸={extend_before_ms}ms, 后延伸={extend_after_ms}ms")
+    # if text_path:
+    #     print(f"文本文件: {text_path}")
+    # else:
+    #     print("未提供文本文件，将不输出文本片段")
+    
     all_cut_info = tool.cut_all_audio(threshold, extend_before_ms, extend_after_ms)
     
     # 保存切割信息
     tool.save_cut_info(all_cut_info)
     
+    # 如果有文本数据，也保存文本片段
+    if text_path and tool.text_data:
+        tool.save_text_segments(all_cut_info)
+    
     # 统计信息
     total_segments = sum(len(info) for info in all_cut_info.values())
     successful_audio = sum(1 for info in all_cut_info.values() if len(info) > 0)
     
+    # 统计有文本片段的数量
+    segments_with_text = 0
+    if text_path:
+        for segments in all_cut_info.values():
+            for segment in segments:
+                if segment.get('text_segment', ''):
+                    segments_with_text += 1
+    
     print(f"\n切割完成!")
     print(f"成功处理音频数: {successful_audio}")
     print(f"总切割片段数: {total_segments}")
+    if text_path:
+        print(f"包含文本的片段数: {segments_with_text}")
     print(f"字数阈值: {threshold}")
     print(f"时间延伸配置: 前{extend_before_ms}ms, 后{extend_after_ms}ms")
     print(f"输出目录: {output_dir}")

@@ -804,7 +804,8 @@ def reverb_aug(waveform: torch.Tensor, config: Dict, rirs: str=None) -> torch.Te
         print(f"Assertion failed: {e}")
         return None
     try:
-        assert waveform.shape[1] >= 16000, "waveform length must be larger than 16000 samples"
+        assert waveform.shape[1] >= 800, "waveform length must be larger than 800 samples"
+        #assert waveform.shape[1] >= 16000, "waveform length must be larger than 16000 samples"
     except AssertionError as e:
         print(f"Assertion failed: {e}")
         print("waveform length: {}".format(waveform.shape[1]))

@@ -675,6 +675,9 @@ class Trainer():
                 #    continue
                 train_data = (d.to(self.device) for d in data)
                 loss, detail_loss = self.model(train_data)
+                if loss is None:
+                    print("Skip invalid batch")
+                    continue
                 self.optim.zero_grad()
                 loss.backward()
                 grad_norm = clip_grad_norm_(self.model.parameters(), 5)

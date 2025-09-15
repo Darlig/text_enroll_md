@@ -274,6 +274,9 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
     def forward(self, input_data):
 
         sph_input, sph_len, phn_label, phn_len, kw_label, kw_len, kw_spec_mask, target, target_len = input_data
+        if torch.any(sph_len < 3):
+            print(f"Rank {dist.get_rank()}: Skipping batch with invalid sph_len={sph_len}")
+            return None, None
         b,t,d = sph_input.size()
         sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
         sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)

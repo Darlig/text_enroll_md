@@ -212,6 +212,7 @@ def plot_roc_curve(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
     plt.legend(loc="lower right")
     plt_path = os.path.join(test_result_dir, 'unet.transformer_{}_roc.png'.format("{}-{}".format(analysis_id, word_py)))
     plt.savefig(plt_path, dpi=400)
+    print("AUC of ROC: {}".format(roc_auc))
     return roc_auc
 
 def plot_pr_curve_and_analysis(ref_score, hyp_score, test_result_dir, analysis_id, word_py, target_precision):

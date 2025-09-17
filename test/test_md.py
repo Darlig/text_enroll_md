@@ -404,6 +404,86 @@ def plot_pr_curve_for_paper(ref_score, hyp_score, test_result_dir, analysis_id, 
 
     return selected_points
 
+
+from scipy.stats import norm
+
+def plot_det_curve(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
+    """
+    Plots a Detection Error Tradeoff (DET) curve.
+
+    Args:
+        ref_score (list or np.array): True binary labels.
+        hyp_score (list or np.array): Target scores, can be probability estimates
+                                     or non-thresholded decision values.
+        test_result_dir (str): Directory to save the plot.
+        analysis_id (str): A unique ID for the analysis, used in the filename.
+        word_py (str): The word or concept the plot represents, used in the title.
+    """
+    # Calculate False Positive Rate (FPR) and True Positive Rate (TPR)
+    # from these, we can derive FAR and FRR
+    fpr, tpr, _ = roc_curve(ref_score, hyp_score)
+
+    # Convert to DET curve axes: FAR vs. FRR
+    # FAR is the same as FPR
+    # FRR = 1 - TPR
+    far = fpr
+    frr = 1 - tpr
+
+    # Convert the rates to a normal deviate scale
+    # We use a custom function to handle 0 and 1 values gracefully
+    def to_normal_deviate(p):
+        p = np.clip(p, 1e-10, 1 - 1e-10) # Clip values to avoid issues with infinity
+        return norm.ppf(p)
+    
+    far_norm = to_normal_deviate(far)
+    frr_norm = to_normal_deviate(frr)
+
+    # Plotting setup
+    plt.style.use('seaborn-v0_8-whitegrid')
+    plt.figure(figsize=(8, 6))
+
+    # Plot the DET curve
+    plt.plot(far_norm, frr_norm, color='#2ca02c', lw=2.5, label='DET Curve')
+
+    # Find and plot the Equal Error Rate (EER) point
+    # EER is the point where FAR equals FRR
+    eer_index = np.argmin(np.abs(far - frr))
+    eer_far = far[eer_index]
+    eer_frr = frr[eer_index]
+    eer_point = (to_normal_deviate(eer_far), to_normal_deviate(eer_frr))
+    
+    plt.scatter([eer_point[0]], [eer_point[1]], s=120, color='red', marker='X', zorder=5)
+    plt.annotate(
+        f'EER = {eer_far:.2%}', # Format as percentage
+        eer_point,
+        textcoords="offset points",
+        xytext=(15, -15),
+        ha='right',
+        arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=5),
+        fontsize=10
+    )
+    print(f"Equal Error Rate (EER): {eer_far:.4f}")
+
+    # Set custom tick labels for the normal deviate scale
+    tick_values = np.array([0.001, 0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5])
+    tick_labels = [f'{p:.1%}' for p in tick_values]
+    plt.xticks(to_normal_deviate(tick_values), tick_labels)
+    plt.yticks(to_normal_deviate(tick_values), tick_labels)
+
+    # Set plot title and labels with enhanced font styles
+    plt.title(f'Detection Error Tradeoff (DET) for {word_py}', fontsize=14, fontweight='bold')
+    plt.xlabel('False Accept Rate (FAR)', fontsize=12)
+    plt.ylabel('False Reject Rate (FRR)', fontsize=12)
+    plt.grid(True, which='both', linestyle='--')
+    plt.legend(loc="upper right", fontsize=10)
+
+    # Save the figure
+    plt_path = os.path.join(test_result_dir, f'unet.transformer_{analysis_id}-{word_py}_det.png')
+    plt.savefig(plt_path, dpi=600, bbox_inches='tight')
+
+    return eer_far
+
+
 def plot_sample_distribution(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
     assert len(ref_score) == len(hyp_score)
     hyp_score_pos = [score for i, score in enumerate(hyp_score) if ref_score[i] == 1]
@@ -476,6 +556,7 @@ def result_analysis(result_label_score_path, is_gop=False, target_precision=0.21
     analysis_id = "analysis" if not is_gop else "gop_analysis"
     plot_roc_curve_for_paper(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all")
     selected_points = plot_pr_curve_for_paper(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all", target_precision)
+    plot_det_curve(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all")
     plot_sample_distribution(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all")
     compute_dcf(
         y_true, y_scores, cost_miss=1.0, cost_fa=1.0, prior_target=0.5, analysis_id=analysis_id

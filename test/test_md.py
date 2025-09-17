@@ -215,6 +215,50 @@ def plot_roc_curve(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
     print("AUC of ROC: {}".format(roc_auc))
     return roc_auc
 
+def plot_roc_curve_for_paper(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
+    """
+    Plots a visually enhanced ROC curve suitable for academic papers.
+
+    Args:
+        ref_score (list or np.array): True binary labels.
+        hyp_score (list or np.array): Target scores, can either be probability estimates
+                                     of the positive class or non-thresholded decision values.
+        test_result_dir (str): Directory to save the plot.
+        analysis_id (str): A unique ID for the analysis, used in the filename.
+        word_py (str): The word or concept the plot represents, used in the title.
+    """
+    fpr, tpr, thresholds = roc_curve(ref_score, hyp_score)
+    roc_auc = auc(fpr, tpr)
+
+    plt.style.use('seaborn-v0_8-whitegrid')  # Use a clean grid style
+    plt.figure(figsize=(8, 6))  # Adjust figure size for better aspect ratio
+
+    # Plot the ROC curve with enhanced aesthetics
+    plt.plot(fpr, tpr, color='#1f77b4', lw=2.5, linestyle='-', label=f'ROC curve (area = {roc_auc:0.4f})')
+
+    # Plot the random chance line
+    plt.plot([0, 1], [0, 1], color='#d62728', lw=2, linestyle='--')
+
+    # Set labels and title with larger font sizes
+    plt.xlabel('False Positive Rate', fontsize=12)
+    plt.ylabel('True Positive Rate', fontsize=12)
+    plt.title(f'Receiver Operating Characteristic for {word_py}', fontsize=14, fontweight='bold')
+    
+    # Adjust axes limits
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    
+    # Add a legend and grid
+    plt.legend(loc="lower right", fontsize=10)
+    plt.grid(True)
+
+    # Save the figure with high resolution
+    plt_path = os.path.join(test_result_dir, f'unet.transformer_{analysis_id}-{word_py}_roc.png')
+    plt.savefig(plt_path, dpi=600, bbox_inches='tight') # High DPI and tight bbox for better quality
+
+    print(f"AUC of ROC: {roc_auc:.4f}")
+    return roc_auc
+
 def plot_pr_curve_and_analysis(ref_score, hyp_score, test_result_dir, analysis_id, word_py, target_precision):
     # from sklearn.metrics import precision_recall_curve
 
@@ -278,6 +322,86 @@ def plot_pr_curve_and_analysis(ref_score, hyp_score, test_result_dir, analysis_i
     plt_path = os.path.join(test_result_dir, 'unet.transformer_{}_pr.png'.format("{}-{}".format(analysis_id, word_py)))
     plt.savefig(plt_path, dpi=400)
     
+    return selected_points
+
+
+def plot_pr_curve_for_paper(ref_score, hyp_score, test_result_dir, analysis_id, word_py, target_precision):
+    """
+    Plots a visually enhanced Precision-Recall (PR) curve suitable for academic papers.
+    It also identifies and highlights specific points based on a target precision.
+
+    Args:
+        ref_score (list or np.array): True binary labels.
+        hyp_score (list or np.array): Target scores, can be probability estimates
+                                     or non-thresholded decision values.
+        test_result_dir (str): Directory to save the plot.
+        analysis_id (str): A unique ID for the analysis, used in the filename.
+        word_py (str): The word or concept the plot represents, used in the title.
+        target_precision (list or float): A list of target precision values to highlight on the curve.
+    """
+    precision, recall, thresholds = precision_recall_curve(ref_score, hyp_score)
+
+    if not isinstance(target_precision, list):
+        target_precision = [target_precision]
+
+    selected_points = []
+
+    print("Target Precision Analysis:")
+    print("=" * 60)
+
+    # Plotting setup
+    plt.style.use('seaborn-v0_8-whitegrid')
+    plt.figure(figsize=(8, 6))
+
+    # Plot the main PR curve
+    plt.plot(recall, precision, color='#1f77b4', lw=2.5, label='PR Curve')
+    
+    # Store and annotate selected points
+    for i, target_p in enumerate(target_precision):
+        closest_precision_index = np.argmin(np.abs(precision - target_p))
+        selected_precision = precision[closest_precision_index]
+        selected_recall = recall[closest_precision_index]
+        
+        # To avoid index out of bounds for thresholds, which has one less element than precision/recall
+        selected_threshold = thresholds[closest_precision_index] if closest_precision_index < len(thresholds) else thresholds[-1]
+        
+        target_f1 = 2 * selected_precision * selected_recall / (selected_precision + selected_recall + 1e-12)
+
+        point_data = {
+            'target_precision': target_p,
+            'actual_precision': selected_precision,
+            'recall': selected_recall,
+            'f1': target_f1,
+            'threshold': selected_threshold
+        }
+        selected_points.append(point_data)
+
+        print(f"Target P={target_p:.4f} -> Actual P={selected_precision:.4f}, R={selected_recall:.4f}, F1={target_f1:.4f}, Threshold={selected_threshold:.6f}")
+
+        # Add an annotation for each selected point
+        plt.scatter([selected_recall], [selected_precision], s=120, color='red', marker='X', zorder=5)
+        plt.annotate(
+            f'P={selected_precision:.2f}, R={selected_recall:.2f}\n(Thr={selected_threshold:.3f})',
+            (selected_recall, selected_precision),
+            textcoords="offset points",
+            xytext=(15, 15),
+            ha='right',
+            arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=5),
+            fontsize=10
+        )
+    
+    # Set plot title and labels with enhanced font styles
+    plt.title(f'Precision-Recall Curve for {word_py}', fontsize=14, fontweight='bold')
+    plt.xlabel('Recall', fontsize=12)
+    plt.ylabel('Precision', fontsize=12)
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.legend(loc="upper right", fontsize=10)
+
+    # Save the figure
+    plt_path = os.path.join(test_result_dir, f'unet.transformer_{analysis_id}-{word_py}_pr.png')
+    plt.savefig(plt_path, dpi=600, bbox_inches='tight')
+
     return selected_points
 
 def plot_sample_distribution(ref_score, hyp_score, test_result_dir, analysis_id, word_py):
@@ -350,8 +474,8 @@ def result_analysis(result_label_score_path, is_gop=False, target_precision=0.21
         # print(y_scores[:10])
         print(len(y_true), len(y_scores))
     analysis_id = "analysis" if not is_gop else "gop_analysis"
-    plot_roc_curve(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all")
-    selected_points = plot_pr_curve_and_analysis(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all", target_precision)
+    plot_roc_curve_for_paper(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all")
+    selected_points = plot_pr_curve_for_paper(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all", target_precision)
     plot_sample_distribution(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all")
     compute_dcf(
         y_true, y_scores, cost_miss=1.0, cost_fa=1.0, prior_target=0.5, analysis_id=analysis_id

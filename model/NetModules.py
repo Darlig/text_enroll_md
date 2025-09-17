@@ -77,7 +77,7 @@ class CTC(nn.Module):
                 # CTC 折叠规则：1) 忽略 blank；2) 连续重复只保留一个
                 if p != blank_id and p != prev:
                     out.append(p)
-                prev = p
+                    prev = p
             results.append(out)
         return results
 

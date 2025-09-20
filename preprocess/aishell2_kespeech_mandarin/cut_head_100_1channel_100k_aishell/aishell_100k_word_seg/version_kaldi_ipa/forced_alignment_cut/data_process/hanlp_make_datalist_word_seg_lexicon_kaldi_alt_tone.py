@@ -1,0 +1,344 @@
+from pyhanlp import *
+import re
+import sys
+import json
+import jieba
+import time
+
+from collections import defaultdict
+from typing import Dict, List, Tuple
+
+word_pinyin_cache = {}
+pattern = re.compile(r"([bpmfdtnlgkhjqxzrzcsyw]?h?)([aeiouüv]+[nr]?g?[\d]?)")
+
+# 类型别名（兼容 Python 3.8）
+ToneGroups = Dict[str, Dict[int, int]]     # 例如: {"ing": {1: 101, 2: 102, 3: 103}}
+Phoneme2ID = Dict[str, int]                # 例如: {"ing3": 103, "q": 3}
+ID2Alts    = Dict[int, List[int]]          # 例如: {103: [101, 102, 104]}
+
+_TONE_RE = re.compile(r"^([a-z]+)([1-5])$")  # 仅把结尾为 1..5 的 token 视作“带声调的韵母”
+
+def build_tone_alt_dict(phoneme2id: Dict[str, int]) -> Tuple[ID2Alts, ToneGroups, Phoneme2ID]:
+    """
+    读取 'symbol id' 文本表，生成：
+      - id2_alt_tone_ids: {带声调韵母的ID: [同一韵母其它声调的ID(按1..5排序)]}
+      - final2_tone2id  : {韵母去声调: {tone: id}}
+      - phoneme2id      : {原始符号: id}
+
+    规则：
+      1) 只把末尾带 1..5 的 token 当作“带声调的韵母”（如 ing3, uo2, er4）
+      2) 其它（如声母 q, zh, ch，或无声调 ee/ii/uu 等）不参与韵母分组，但会记录到 phoneme2id
+      3) 值列表不包含自身（“不同声调”）
+    """
+    #phoneme2id: Phoneme2ID = {}
+    final2_tone2id: ToneGroups = defaultdict(dict)
+
+    for sym, pid in phoneme2id.items():
+
+        m = _TONE_RE.fullmatch(sym)
+        if m:
+            base_final = m.group(1)         # 去掉声调的韵母，如 "ing"
+            tone = int(m.group(2))          # 1..5
+            final2_tone2id[base_final][tone] = pid
+
+    # 为每个“带声调韵母ID”生成其它声调 ID 列表（按 tone 升序）
+    id2_alt_tone_ids: ID2Alts = {}
+    for base_final, tone2id in final2_tone2id.items():
+        tones_sorted = sorted(tone2id.keys())  # 1..5 中实际存在的那些
+        for tone in tones_sorted:
+            this_id = tone2id[tone]
+            # “不同声调” => 排除自身
+            alt_ids = [tone2id[t] for t in tones_sorted if t != tone]
+            id2_alt_tone_ids[this_id] = alt_ids
+
+    return id2_alt_tone_ids, final2_tone2id, phoneme2id
+
+
+
+def convert_and_split(segment):
+    word2phone = {}
+    for i, word in enumerate(segment):
+        word2phone[i] = []
+        if word.word not in word_pinyin_cache:
+            phone_seq = HanLP.convertToPinyinList(word.word)
+            phone_seq = str(phone_seq).strip("[]").replace(" ","").split(",")
+            word_pinyin_cache[word.word] = phone_seq
+        else:
+            phone_seq = word_pinyin_cache[word.word]
+        if len(word.word) != len(phone_seq):
+            continue
+        for j, character in enumerate(phone_seq):
+            if character == 'none5':
+                word2phone[i].append([word.word[j], 'UNK', 'UNK'])
+            else:
+                match = pattern.match(character.replace(" ", ""))
+                if match:
+                    init, final = match.groups()
+                    if init == "":
+                        init = None
+                    word2phone[i].append([word.word[j], init, final])
+                else:
+                    word2phone[i].append([word.word[j], None])
+    return word2phone
+
+def load_lexicon(lexicon_path):
+    lexicon_dict = {}
+    with open(lexicon_path) as f:
+        for line in f:
+            key, value = re.split(r'\s+', line.strip(), maxsplit=1)
+            if key not in lexicon_dict:
+                lexicon_dict[key] = value
+    return lexicon_dict
+
+def text_to_segment_phone(text, lexicon):
+    #jieba.set_dictionary(user_dict)
+    words = jieba.lcut(text)
+    word2phone = {}
+    is_oov = False
+    for i, word in enumerate(words):
+        word2phone[i] = []
+        if word in lexicon:
+            phone_seq = lexicon[word].split()
+        else:
+            phone_seq = []
+            for c in word:
+                if c not in lexicon:
+                    is_oov = True
+                    return None
+                phone_seq.extend(lexicon[c].split())
+        if len(phone_seq) != 2 * len(word):
+            print("text: {}, phone_seq: {}, word: {}".format(text, phone_seq, word))
+            print("length mismatch")
+            exit()
+        assert len(phone_seq) == 2 * len(word)
+        for j, character in enumerate(word):
+            init = phone_seq[j*2]
+            final = phone_seq[j*2+1]
+            word2phone[i].append([word[j], init, final])
+    return word2phone
+        
+
+def read_scp(scp_file):
+    #print("read_scp(): scp_file is {}".format(scp_file))
+    obj = {}
+    with open(scp_file) as ff:
+        for line in ff.readlines():
+            line = line.strip()
+            line = re.sub(r"\s+", " ", line)
+            if '\t' in line:
+                line = line.replace("\t", " ")
+            line = line.split(" ")
+            if len(line) < 2:
+                continue
+            utt = line[0]
+            content = "".join(line[1:])
+            obj.update({utt: content})
+    return obj
+
+def detach_item(items, word2id, phone2id):
+    max_wrd_id = max(list(word2id.values())) if len(word2id) > 0 else 2
+    max_phn_id = max(list(phone2id.values())) if len(phone2id) > 0 else 2
+    word_seq = []
+    phn_seq = []
+    for item in items:
+        word, init, final = item
+        if word not in word2id:
+            max_wrd_id += 1
+            word2id[word] = max_wrd_id
+        if init != None and init not in phone2id:
+            max_phn_id += 1
+            phone2id[init] = max_phn_id
+        if final not in phone2id:
+            max_phn_id += 1
+            phone2id[final] = max_phn_id
+        word_seq.append(word2id[word])
+        if init != None:
+            phn_seq.append([phone2id[init], phone2id[final]])
+        else:
+            phn_seq.append([phone2id[final]])
+
+    return word_seq, phn_seq, word2id, phone2id
+
+def multi_index(lexicon):
+    lexicon_by_len = lexicon
+    lexicon_by_init = {}
+    lexicon_by_final = {}
+    lexicon_multi_index = {}
+    #for i in lexicon_by_len:
+    #    print(i)
+    for char in lexicon_by_len[1]:
+        char = char[0]
+        if len(char) != 2:
+            #print("char: {}".format(char))
+            continue
+        init, final = char
+        if init not in lexicon_by_init:
+            lexicon_by_init[init] = []
+        if final not in lexicon_by_init[init]:
+            lexicon_by_init[init].append(final)
+        if final not in lexicon_by_final:
+            lexicon_by_final[final] = []
+        if init not in lexicon_by_final[final]:
+            lexicon_by_final[final].append(init)
+    lexicon_multi_index['by_len'] = lexicon_by_len
+    lexicon_multi_index['by_init'] = lexicon_by_init
+    lexicon_multi_index['by_final'] = lexicon_by_final
+    return lexicon_multi_index
+
+def split_and_tokenize(text_obj, in_word2id, in_phone2id, in_lexicon, user_dict):
+    #print("split_and_tokenize() start")
+    jieba.set_dictionary(user_dict)
+    word2id = in_word2id
+    phone2id = in_phone2id
+    tokenized_objs = {}
+    lexicon = {}
+    t_cost_till_seg = 0
+    t_cost_till_convert = 0
+    t_cost_till_items = 0
+    t_cost_till_detach = 0
+    t_cost_till_lex = 0
+    for i, (key, content) in enumerate(text_obj.items()):
+        #print(i)
+        t_start_seg = time.time()
+        match_digit_letter = re.search(r'[a-zA-Z0-9]', content) # remove the content which contain digit and letter 
+                                                                # digit in chinese format is allowed for example "一二三"
+        if match_digit_letter:
+            print("match digit or letter")
+            continue
+        if i % 1000 == 0:
+            print ("hanlp has segment {} utterance".format(i))
+            #print("time cost till seg: {:.3f}".format(t_cost_till_seg))
+            #print("time cost till convert: {:.3f}".format(t_cost_till_convert))
+            #print("time cost till items: {:.3f}".format(t_cost_till_items))
+            #print("time cost till detach: {:.3f}".format(t_cost_till_detach))
+            #print("time cost till lex: {:.3f}".format(t_cost_till_lex))
+        one_sample_wrd = []
+        one_sample_phn = []
+        one_sample_phn_seg = []
+        #segment = HanLP.segment(content)
+        #t_cost_till_seg += time.time() - t_start_seg
+        #t_start_convert = time.time()
+        ##print("content: {}".format(content))
+        ##print("segment: {}".format(segment))
+        ##segment_label = [ [ cid for cid, character in enumerate(str(seg).split('/')[0]) ] for seg in segment ]
+        #word2phone = convert_and_split(segment)
+        #in_lexicon = load_lexicon(in_lexicon)
+        content = re.sub(r'[^\u4e00-\u9fa5]', '', content)
+        word2phone = text_to_segment_phone(content, in_lexicon)
+        if word2phone == None:
+            print("word segment failed")
+            continue
+        if word2phone == {}:
+            print("word segment return empty dict")
+            continue
+        #t_cost_till_convert += time.time() - t_start_convert
+        #segment_label = [ [ [ p for p in py[1:3] if p != None ] for py in items ] for idx, items in word2phone.items() ]
+        #segment_label = [ [ p for p in py[1:3] if p != None for py in items ] for idx, items in word2phone.items() ]
+        #segment_label = [ [ py for py in items[1:3] if py != None ] for idx, items in word2phone.items() ]
+        #print("segment_label: {}".format(segment_label))
+        t_start_items = time.time()
+        for idx, items in word2phone.items():
+            t_start_detach = time.time()
+            word_seq, phn_seq, word2id, phone2id = detach_item(items, word2id, phone2id)
+            #t_cost_till_detach += time.time() - t_start_detach
+            one_sample_wrd.extend(word_seq)
+            one_sample_phn.extend(phn_seq)
+            one_sample_phn_seg.append(phn_seq)
+            seg_len = len(phn_seq)
+            #if seg_len == 0:
+            #    print(phn_seq)
+            t_start_lex = time.time()
+            if seg_len not in lexicon:
+                lexicon[seg_len] = set()
+                #lexicon[seg_len] = []
+            
+            lexicon[seg_len].add(json.dumps({'phn_seq': phn_seq}))
+            #t_cost_till_lex += time.time() - t_start_lex
+            #print("word_seq: {}".format(word_seq))
+            #print("phn_seq: {}".format(phn_seq))
+        tokenized_objs.update({
+            key: {'bpe_label': one_sample_wrd, 'phn_label': one_sample_phn, 'segment_label': one_sample_phn_seg}
+        })
+        #t_cost_till_items += time.time() - t_start_items
+    #for seg_len in lexicon:
+    #    print(seg_len)
+    for seg_len, phn_seqs in lexicon.items():
+        #print(seg_len, phn_seqs)
+        phn_seqs = list(phn_seqs)
+        phn_seqs = [ json.loads(p)['phn_seq'] for p in phn_seqs ]
+        lexicon[seg_len] = phn_seqs
+    lexicon = multi_index(lexicon)
+    print("length of lexicon: {}".format(len(lexicon)))
+
+    return tokenized_objs, word2id, phone2id, lexicon
+
+def write_data_list(wav_scp, tokenized_objs, word2id, phone2id, out_word2id, out_phone2id, out_datalist):
+    dlist = open(out_datalist, 'w')
+    for key, tokenized_item in tokenized_objs.items():
+        if key not in wav_scp:
+            continue
+        word_seq = tokenized_item['bpe_label']
+        phn_seq = tokenized_item['phn_label']
+        segment_label = tokenized_item['segment_label']
+        one_obj = {
+            'key': key,
+            'sph': wav_scp[key],
+            'bpe_label': word_seq,
+            'phn_label': phn_seq,
+            'segment_label': segment_label,
+            'kw_candidate': [x for x in range(len(phn_seq))],
+            'b_kw_candidate': [x for x in range(len(word_seq))]
+        }
+        dlist.write(f"{json.dumps(one_obj)}\n")
+    
+    with open(out_word2id, 'w') as wf:
+        for word, id in word2id.items():
+            wf.write("{} {}\n".format(word, id))
+    
+    with open(out_phone2id, 'w') as pf:
+        for phn, id in phone2id.items():
+            pf.write("{} {}\n".format(phn, id))
+
+def load_dict(dict_file):
+    my_dict = {}
+    with open(dict_file, 'r') as f_dict:
+        for line in f_dict:
+            key, value = line.strip().split()
+            my_dict[key] = int(value)
+    return my_dict
+
+def write_lexicon(lexicon, out_lexicon):
+    print(len(lexicon))
+    with open(out_lexicon, 'w') as f_lexicon:
+        json.dump(lexicon, f_lexicon, indent=4)
+
+def main(text_scp, wav_scp, in_word2id, in_phone2id, in_lexicon, user_dict, out_word2id, out_phone2id, out_datalist, out_lexicon):
+    text_scp = read_scp(text_scp)
+    in_word2id = load_dict(in_word2id)
+    in_phone2id = load_dict(in_phone2id)
+    in_lexicon = load_lexicon(in_lexicon)
+    print("len of text_scp: {}".format(len(text_scp)))
+    tokenized_objs, word2id, phone2id, lexicon = split_and_tokenize(text_scp, in_word2id, in_phone2id, in_lexicon, user_dict)
+    id2_alt, final_groups, ph2id = build_tone_alt_dict(phone2id)
+    lexicon.update({'alt_tone': id2_alt})
+    #write_lexicon(lexicon['by_len'], out_lexicon)
+    write_lexicon(lexicon, out_lexicon)
+    wav_scp = read_scp(wav_scp)
+    write_data_list(wav_scp, tokenized_objs, word2id, phone2id, out_word2id, out_phone2id, out_datalist)
+
+
+if __name__ == '__main__':
+    if len(sys.argv) != 11:
+        print ("Usage: python hanlp_split.py text wav.scp in_word2id in_phone2id in_lexicon user_dict out_word2id out_phone2id out_datalist out_lexicon")
+        exit()
+    text_scp = sys.argv[1]
+    wav_scp = sys.argv[2]
+    in_word2id = sys.argv[3]
+    in_phone2id = sys.argv[4]
+    in_lexicon = sys.argv[5]
+    user_dict = sys.argv[6]
+    out_word2id = sys.argv[7]
+    out_phone2id = sys.argv[8]
+    out_datalist = sys.argv[9]
+    out_lexicon = sys.argv[10]
+    main(text_scp, wav_scp, in_word2id, in_phone2id, in_lexicon, user_dict, out_word2id, out_phone2id, out_datalist, out_lexicon)

@@ -356,39 +356,72 @@ def plot_pr_curve_for_paper(ref_score, hyp_score, test_result_dir, analysis_id, 
     # Plot the main PR curve
     plt.plot(recall, precision, color='#1f77b4', lw=2.5, label='PR Curve')
     
+    epsilon = 0.03
+    mask = (precision >= epsilon) & (recall >= epsilon) & (recall <= 1 - epsilon)
+        
+    # 获取过滤后的索引
+    filtered_indices = np.where(mask)[0]
+    filtered_precision = precision[filtered_indices]
     # Store and annotate selected points
     for i, target_p in enumerate(target_precision):
-        closest_precision_index = np.argmin(np.abs(precision - target_p))
-        selected_precision = precision[closest_precision_index]
-        selected_recall = recall[closest_precision_index]
+        filtered_max_index = np.argmax(filtered_precision)
+        max_index = filtered_indices[filtered_max_index]
+        max_precision = precision[max_index]
+        max_index_recall = recall[max_index]
+        print("Max precision: {}, recall: {}".format(max_precision, max_index_recall))
+        precision_left = precision[:max_index+1]
+        recall_left = recall[:max_index+1]
+        thresholds_left = thresholds[:max_index+1]
+        precision_right = precision[max_index:]
+        recall_right = recall[max_index:]
+        thresholds_right = thresholds[max_index:]
         
-        # To avoid index out of bounds for thresholds, which has one less element than precision/recall
-        selected_threshold = thresholds[closest_precision_index] if closest_precision_index < len(thresholds) else thresholds[-1]
+        closest_precision_index_left = np.argmin(np.abs(precision_left - target_p))
+        selected_precision_left = precision_left[closest_precision_index_left]
+        selected_recall_left = recall_left[closest_precision_index_left]
+        selected_threshold_left = thresholds_left[closest_precision_index_left] if closest_precision_index_left < len(thresholds_left) else thresholds_left[-1]
+        closest_precision_index_right = np.argmin(np.abs(precision_right - target_p))
+        selected_precision_right = precision_right[closest_precision_index_right]
+        selected_recall_right = recall_right[closest_precision_index_right]
+        selected_threshold_right = thresholds_right[closest_precision_index_right] if closest_precision_index_right < len(thresholds_right) else thresholds_right[-1]
         
-        target_f1 = 2 * selected_precision * selected_recall / (selected_precision + selected_recall + 1e-12)
+        if selected_recall_left == selected_recall_right:
+            selected_precisions = [selected_precision_left]
+            selected_recalls = [selected_recall_left]
+            selected_thresholds = [selected_threshold_left]
+        else:
+            selected_precisions = [selected_precision_left, selected_precision_right]
+            selected_recalls = [selected_recall_left, selected_recall_right]
+            selected_thresholds = [selected_threshold_left, selected_threshold_right]
 
-        point_data = {
-            'target_precision': target_p,
-            'actual_precision': selected_precision,
-            'recall': selected_recall,
-            'f1': target_f1,
-            'threshold': selected_threshold
-        }
-        selected_points.append(point_data)
+        for i, selected_precision in enumerate(selected_precisions):
+            selected_recall = selected_recalls[i]
+            selected_threshold = selected_thresholds[i]
+            
+            target_f1 = 2 * selected_precision * selected_recall / (selected_precision + selected_recall + 1e-12)
 
-        print(f"Target P={target_p:.4f} -> Actual P={selected_precision:.4f}, R={selected_recall:.4f}, F1={target_f1:.4f}, Threshold={selected_threshold:.6f}")
+            point_data = {
+                'target_precision': target_p,
+                'actual_precision': selected_precision,
+                'recall': selected_recall,
+                'f1': target_f1,
+                'threshold': selected_threshold
+            }
+            selected_points.append(point_data)
 
-        # Add an annotation for each selected point
-        plt.scatter([selected_recall], [selected_precision], s=120, color='red', marker='X', zorder=5)
-        plt.annotate(
-            f'P={selected_precision:.2f}, R={selected_recall:.2f}\n(Thr={selected_threshold:.3f})',
-            (selected_recall, selected_precision),
-            textcoords="offset points",
-            xytext=(15, 15),
-            ha='right',
-            arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=5),
-            fontsize=10
-        )
+            print(f"Target P={target_p:.4f} -> Actual P={selected_precision:.4f}, R={selected_recall:.4f}, F1={target_f1:.4f}, Threshold={selected_threshold:.6f}")
+
+            ## Add an annotation for each selected point
+            #plt.scatter([selected_recall], [selected_precision], s=120, color='red', marker='X', zorder=5)
+            #plt.annotate(
+            #    f'P={selected_precision:.2f}, R={selected_recall:.2f}\n(Thr={selected_threshold:.3f})',
+            #    (selected_recall, selected_precision),
+            #    textcoords="offset points",
+            #    xytext=(15, 15),
+            #    ha='right',
+            #    arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=5),
+            #    fontsize=10
+            #)
     
     # Set plot title and labels with enhanced font styles
     plt.title(f'Precision-Recall Curve for {word_py}', fontsize=14, fontweight='bold')

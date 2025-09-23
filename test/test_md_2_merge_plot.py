@@ -379,7 +379,7 @@ def plot_pr_curve_and_analysis(ref_score, hyp_score, test_result_dir, analysis_i
     return selected_points
 
 
-def plot_multi_pr_curve_for_paper(pr_inputs, test_result_dir, analysis_id, word_py):
+def plot_multi_pr_curve_for_paper(pr_inputs, given_points, test_result_dir, analysis_id, word_py):
     """
     Plots a visually enhanced Precision-Recall (PR) curve suitable for academic papers.
     It also identifies and highlights specific points based on a target precision.
@@ -418,8 +418,22 @@ def plot_multi_pr_curve_for_paper(pr_inputs, test_result_dir, analysis_id, word_
     
 
         # Plot the random chance line
-        plt.plot([0, 1], [0, 1], color='#d62728', lw=2, linestyle='--')
-    
+        #plt.plot([0, 1], [0, 1], color='#d62728', lw=2, linestyle='--')
+
+
+    # 为每个选中的点画散点
+    colors = ['red', 'blue', 'green', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan', 'magenta']
+    markers = ['x', 'o', 's', '^', 'v', 'D', '*', '+', '<', '>']
+    for i, point in enumerate(given_points):
+        color = colors[i % len(colors)]
+        marker = markers[i % 10]
+        #marker = ['x', 'o', 's', '^', 'v', 'D', '*', '+', '<', '>'][i % 10]
+        plt.scatter([point['recall']], [point['precision']], 
+                   color=color, marker=marker, s=100, 
+                   label=point['tag'])
+
+
+
     # Set plot title and labels with enhanced font styles
     plt.title(f'Precision-Recall Curve', fontsize=14, fontweight='bold')
     #plt.title(f'Precision-Recall Curve for {word_py}', fontsize=14, fontweight='bold')
@@ -780,9 +794,14 @@ if __name__ == '__main__':
     #roc_inputs.append([y_true_e2e, y_scores_e2e, "Ours_E2E"])
     roc_inputs.append([y_true_ctc_gop, y_scores_ctc_gop, "Ours_CTC_GOP"])
     roc_inputs.append([y_true_hybrid_gop, y_scores_hybrid_gop, "Hybrid_GOP"])
+    svm_points = [
+        {"precision": 0.21, "recall": 0.27, "tag": "SVM(Random)"},
+        {"precision": 0.18, "recall": 0.49, "tag": "SVM(Knowledge)"}
+    ]
+
     analysis_id = "analysis"
     plot_multi_roc_curve_for_paper(roc_inputs, out_dir, analysis_id, "all")
-    plot_multi_pr_curve_for_paper(roc_inputs, out_dir, analysis_id, "all")
+    plot_multi_pr_curve_for_paper(roc_inputs, svm_points, out_dir, analysis_id, "all")
     #plot_det_curve_for_paper(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all")
     #plot_sample_distribution(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all")
     #compute_dcf(

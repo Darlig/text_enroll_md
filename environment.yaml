@@ -17,3 +17,4 @@ dependencies:
     - pyyaml-include==1.3
     - soundfile==0.12.1
     - tensorboard
+    - git+https://github.com/openai/whisper.git

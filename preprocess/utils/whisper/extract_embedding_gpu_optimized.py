@@ -16,7 +16,60 @@ from whisper.decoding import DecodingOptions
 from whisper.audio import N_FRAMES
 
 
-def extract_embedding_batch(model, audio_paths, uttids, output_dir="embeddings", batch_size=8):
+def generate_hierarchical_output_path(audio_path, uttid, output_dir):
+    """
+    根据原始音频路径生成层次化的输出路径
+    
+    Parameters
+    ----------
+    audio_path : str
+        原始音频文件路径
+    uttid : str
+        音频ID
+    output_dir : str
+        输出根目录
+        
+    Returns
+    -------
+    str
+        层次化的输出路径
+    """
+    # 从音频路径中提取目录结构
+    # 例如: /work104/weiyang/data/TIMIT/data/TEST/DR1/FAKS0/SA1.WAV
+    # 提取: TEST/DR1/FAKS0/
+    path_parts = audio_path.split('/')
+    
+    # 找到数据根目录（通常包含TEST或TRAIN等标识）
+    data_root_idx = -1
+    for i, part in enumerate(path_parts):
+        if part in ['TEST', 'TRAIN', 'data']:
+            data_root_idx = i
+            break
+    
+    if data_root_idx == -1:
+        # 如果找不到标准的数据根目录，使用文件名前的最后两级目录
+        data_root_idx = max(0, len(path_parts) - 3)
+    
+    # 构建相对路径
+    if data_root_idx < len(path_parts) - 1:
+        relative_path = '/'.join(path_parts[data_root_idx:-1])  # 排除文件名
+        output_subdir = os.path.join(output_dir, relative_path)
+    else:
+        # 如果路径太短，使用uttid的前几个字符作为子目录
+        subdir = uttid[:8] if len(uttid) >= 8 else uttid
+        output_subdir = os.path.join(output_dir, subdir)
+    
+    # 确保输出目录存在
+    os.makedirs(output_subdir, exist_ok=True)
+    
+    # 生成输出文件路径
+    filename = f"{uttid}.npy"
+    output_path = os.path.join(output_subdir, filename)
+    
+    return output_path
+
+
+def extract_embedding_batch(model, audio_paths, uttids, output_dir="embeddings", batch_size=8, preserve_structure=True):
     """
     批量提取 embedding（GPU优化版本）
     
@@ -32,6 +85,8 @@ def extract_embedding_batch(model, audio_paths, uttids, output_dir="embeddings",
         输出目录
     batch_size : int
         批处理大小
+    preserve_structure : bool
+        是否保持原始目录结构
         
     Returns
     -------
@@ -90,8 +145,14 @@ def extract_embedding_batch(model, audio_paths, uttids, output_dir="embeddings",
                 uttid = batch_uttids[idx]
                 features = batch_features[j].cpu().numpy()
                 
-                # 保存embedding
-                embedding_path = os.path.join(output_dir, f"{uttid}.npy")
+                # 生成输出路径
+                if preserve_structure:
+                    embedding_path = generate_hierarchical_output_path(
+                        batch_paths[idx], uttid, output_dir
+                    )
+                else:
+                    embedding_path = os.path.join(output_dir, f"{uttid}.npy")
+                
                 np.save(embedding_path, features)
                 
                 results.append({
@@ -108,7 +169,7 @@ def extract_embedding_batch(model, audio_paths, uttids, output_dir="embeddings",
             # 批量处理失败，回退到单个处理
             for j, (audio_path, uttid) in enumerate(zip(batch_paths, batch_uttids)):
                 try:
-                    result = extract_embedding_single(model, audio_path, uttid, output_dir)
+                    result = extract_embedding_single(model, audio_path, uttid, output_dir, preserve_structure)
                     results.append(result)
                     if result["success"]:
                         success_count += 1
@@ -128,7 +189,7 @@ def extract_embedding_batch(model, audio_paths, uttids, output_dir="embeddings",
     return results, success_count, error_count
 
 
-def extract_embedding_single(model, audio_path, uttid, output_dir):
+def extract_embedding_single(model, audio_path, uttid, output_dir, preserve_structure=True):
     """
     单个音频文件提取 embedding
     """
@@ -149,8 +210,12 @@ def extract_embedding_single(model, audio_path, uttid, output_dir):
         with torch.no_grad():
             audio_features = model.encoder(mel)
         
-        # 保存embedding
-        embedding_path = os.path.join(output_dir, f"{uttid}.npy")
+        # 生成输出路径
+        if preserve_structure:
+            embedding_path = generate_hierarchical_output_path(audio_path, uttid, output_dir)
+        else:
+            embedding_path = os.path.join(output_dir, f"{uttid}.npy")
+        
         np.save(embedding_path, audio_features.cpu().numpy())
         
         return {
@@ -187,7 +252,7 @@ def load_wav_scp(wav_scp_path):
     return wav_dict
 
 
-def batch_extract_embeddings_optimized(model, wav_scp_path, output_dir="embeddings", batch_size=8, num_workers=4):
+def batch_extract_embeddings_optimized(model, wav_scp_path, output_dir="embeddings", batch_size=8, num_workers=4, preserve_structure=True):
     """
     GPU优化的批量提取 embedding
     """
@@ -211,7 +276,8 @@ def batch_extract_embeddings_optimized(model, wav_scp_path, output_dir="embeddin
         audio_paths=audio_paths,
         uttids=uttids,
         output_dir=output_dir,
-        batch_size=batch_size
+        batch_size=batch_size,
+        preserve_structure=preserve_structure
     )
     
     # 保存处理日志
@@ -247,6 +313,8 @@ def main():
     parser.add_argument("--device", default="auto", help="设备类型 (auto/cpu/cuda)")
     parser.add_argument("--batch_size", "-b", type=int, default=8, help="批处理大小")
     parser.add_argument("--num_workers", "-w", type=int, default=4, help="工作进程数")
+    parser.add_argument("--preserve_structure", action="store_true", default=True, help="保持原始目录结构")
+    parser.add_argument("--flat_output", action="store_true", help="使用扁平输出结构（所有文件在同一目录）")
     parser.add_argument("--single", help="处理单个音频文件（用于测试）")
     
     args = parser.parse_args()
@@ -257,8 +325,12 @@ def main():
     else:
         device = args.device
     
+    # 设置目录结构选项
+    preserve_structure = not args.flat_output
+    
     print(f"使用设备: {device}")
     print(f"加载模型: {args.model}")
+    print(f"目录结构: {'层次化' if preserve_structure else '扁平化'}")
     
     # 加载模型
     model = whisper.load_model(args.model, device=device)
@@ -270,7 +342,8 @@ def main():
             model=model,
             audio_path=args.single,
             uttid="test",
-            output_dir=args.output_dir
+            output_dir=args.output_dir,
+            preserve_structure=preserve_structure
         )
         
         if result["success"]:
@@ -291,7 +364,8 @@ def main():
             wav_scp_path=args.wav_scp,
             output_dir=args.output_dir,
             batch_size=args.batch_size,
-            num_workers=args.num_workers
+            num_workers=args.num_workers,
+            preserve_structure=preserve_structure
         )
 
 

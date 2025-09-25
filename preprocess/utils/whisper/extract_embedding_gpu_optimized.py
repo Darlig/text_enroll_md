@@ -64,7 +64,8 @@ def generate_hierarchical_output_path(audio_path, dir_depth, output_dir):
     
     # 生成输出文件路径
     basename = os.path.basename(audio_path)
-    base_id = re.sub(r'\.WAV', '', basename)
+    # 去除文件扩展名
+    base_id = '.'.join(basename.split('.')[:-1])
     filename = f"{base_id}.npy"
     output_path = os.path.join(output_subdir, filename)
     

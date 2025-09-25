@@ -318,7 +318,7 @@ def main():
     parser.add_argument("--batch_size", "-b", type=int, default=8, help="批处理大小")
     parser.add_argument("--num_workers", "-w", type=int, default=4, help="工作进程数")
     parser.add_argument("--preserve_structure", action="store_true", default=True, help="保持原始目录结构")
-    parser.add_argument("--flat_output", action="store_true", default=False, help="使用扁平输出结构（所有文件在同一目录）")
+    # parser.add_argument("--flat_output", action="store_true", default=False, help="使用扁平输出结构（所有文件在同一目录）")
     parser.add_argument("--single", help="处理单个音频文件（用于测试）")
     parser.add_argument("--dir_depth", type=int, default=3, help="保留原始目录深度")
     
@@ -331,7 +331,7 @@ def main():
         device = args.device
     
     # 设置目录结构选项
-    preserve_structure = not args.flat_output
+    preserve_structure = args.preserve_structure
     dir_depth = args.dir_depth
     print(f"使用设备: {device}")
     print(f"加载模型: {args.model}")

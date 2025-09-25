@@ -16,7 +16,7 @@ from whisper.decoding import DecodingOptions
 from whisper.audio import N_FRAMES
 
 
-def generate_hierarchical_output_path(audio_path, uttid, output_dir):
+def generate_hierarchical_output_path(audio_path, dir_depth, output_dir):
     """
     根据原始音频路径生成层次化的输出路径
     
@@ -24,8 +24,8 @@ def generate_hierarchical_output_path(audio_path, uttid, output_dir):
     ----------
     audio_path : str
         原始音频文件路径
-    uttid : str
-        音频ID
+    dir_depth : int
+        保留原始目录深度
     output_dir : str
         输出根目录
         
@@ -41,35 +41,36 @@ def generate_hierarchical_output_path(audio_path, uttid, output_dir):
     
     # 找到数据根目录（通常包含TEST或TRAIN等标识）
     data_root_idx = -1
-    for i, part in enumerate(path_parts):
-        if part in ['TEST', 'TRAIN', 'data']:
-            data_root_idx = i
-            break
+    # for i, part in enumerate(path_parts):
+    #     if part in ['TEST', 'TRAIN', 'data']:
+    #         data_root_idx = i
+    #         break
     
     if data_root_idx == -1:
         # 如果找不到标准的数据根目录，使用文件名前的最后两级目录
-        data_root_idx = max(0, len(path_parts) - 3)
+        data_root_idx = max(0, len(path_parts) - dir_depth)
     
     # 构建相对路径
-    if data_root_idx < len(path_parts) - 1:
-        relative_path = '/'.join(path_parts[data_root_idx:-1])  # 排除文件名
-        output_subdir = os.path.join(output_dir, relative_path)
-    else:
-        # 如果路径太短，使用uttid的前几个字符作为子目录
-        subdir = uttid[:8] if len(uttid) >= 8 else uttid
-        output_subdir = os.path.join(output_dir, subdir)
+    # if data_root_idx < len(path_parts) - 1:
+    relative_path = '/'.join(path_parts[data_root_idx:-1])  # 排除文件名
+    output_subdir = os.path.join(output_dir, relative_path)
+    # else:
+    #     # 如果路径太短，使用uttid的前几个字符作为子目录
+    #     subdir = uttid[:8] if len(uttid) >= 8 else uttid
+    #     output_subdir = os.path.join(output_dir, subdir)
     
     # 确保输出目录存在
     os.makedirs(output_subdir, exist_ok=True)
     
     # 生成输出文件路径
-    filename = f"{uttid}.npy"
+    basename = os.path.basename(audio_path)
+    filename = f"{basename}.npy"
     output_path = os.path.join(output_subdir, filename)
     
     return output_path
 
 
-def extract_embedding_batch(model, audio_paths, uttids, output_dir="embeddings", batch_size=8, preserve_structure=True):
+def extract_embedding_batch(model, audio_paths, uttids, output_dir="embeddings", batch_size=8, preserve_structure=True, dir_depth=3):
     """
     批量提取 embedding（GPU优化版本）
     
@@ -148,7 +149,7 @@ def extract_embedding_batch(model, audio_paths, uttids, output_dir="embeddings",
                 # 生成输出路径
                 if preserve_structure:
                     embedding_path = generate_hierarchical_output_path(
-                        batch_paths[idx], uttid, output_dir
+                        batch_paths[idx], dir_depth, output_dir
                     )
                 else:
                     embedding_path = os.path.join(output_dir, f"{uttid}.npy")
@@ -252,7 +253,7 @@ def load_wav_scp(wav_scp_path):
     return wav_dict
 
 
-def batch_extract_embeddings_optimized(model, wav_scp_path, output_dir="embeddings", batch_size=8, num_workers=4, preserve_structure=True):
+def batch_extract_embeddings_optimized(model, wav_scp_path, output_dir="embeddings", batch_size=8, num_workers=4, preserve_structure=True, dir_depth=3):
     """
     GPU优化的批量提取 embedding
     """
@@ -277,7 +278,8 @@ def batch_extract_embeddings_optimized(model, wav_scp_path, output_dir="embeddin
         uttids=uttids,
         output_dir=output_dir,
         batch_size=batch_size,
-        preserve_structure=preserve_structure
+        preserve_structure=preserve_structure,
+        dir_depth=dir_depth
     )
     
     # 保存处理日志
@@ -314,8 +316,9 @@ def main():
     parser.add_argument("--batch_size", "-b", type=int, default=8, help="批处理大小")
     parser.add_argument("--num_workers", "-w", type=int, default=4, help="工作进程数")
     parser.add_argument("--preserve_structure", action="store_true", default=True, help="保持原始目录结构")
-    parser.add_argument("--flat_output", action="store_true", help="使用扁平输出结构（所有文件在同一目录）")
+    parser.add_argument("--flat_output", action="store_true", default=False, help="使用扁平输出结构（所有文件在同一目录）")
     parser.add_argument("--single", help="处理单个音频文件（用于测试）")
+    parser.add_argument("--dir_depth", type=int, default=3, help="保留原始目录深度")
     
     args = parser.parse_args()
     
@@ -327,11 +330,11 @@ def main():
     
     # 设置目录结构选项
     preserve_structure = not args.flat_output
-    
+    dir_depth = args.dir_depth
     print(f"使用设备: {device}")
     print(f"加载模型: {args.model}")
     print(f"目录结构: {'层次化' if preserve_structure else '扁平化'}")
-    
+    print(f"目录深度: {dir_depth}")
     # 加载模型
     model = whisper.load_model(args.model, device=device)
     
@@ -365,7 +368,8 @@ def main():
             output_dir=args.output_dir,
             batch_size=args.batch_size,
             num_workers=args.num_workers,
-            preserve_structure=preserve_structure
+            preserve_structure=preserve_structure,
+            dir_depth=dir_depth
         )
 
 

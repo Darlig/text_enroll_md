@@ -19,7 +19,7 @@ NONE_TENSOR_KEY = [
     'wav', 'key', 'sph', 'corruption_material', 'segment', 'segment_idx',
     'n_scorrupt', 'n_ncorrupt', 'num_corrupt', 'rirs', 'neg_candidate',
     'corrupt', 'self_corruption', 'none_target_corruption', 'nframes', 'ref1', 'ref2', 'ref3', 'ref0',
-    'self_crpt_ratios', 'noise_crpt_ratios', 'self_crpt_material', 'noise_crpt_material', 's_name', 'aux_lexicon'
+    'self_crpt_ratios', 'noise_crpt_ratios', 'self_crpt_material', 'noise_crpt_material', 's_name', 'aux_lexicon', 'aux_lexicon_dict', 'sph_emb'
 ]
 CTC_KEY = [
     'label', 'crpt_label', 'phn_label', 'bpe_label', 'c_phn_label', 'c_bpe_label',
@@ -257,6 +257,13 @@ def process_speech_feats(data: Iterator[Dict], config: Dict[Any, Any]) -> Iterat
         yield sample 
 
 
+def process_speech_embedding(data: Iterator[Dict], config: Dict[Any, Any]) -> Iterator[Dict]:
+    for sample in data:
+        sph_embed = np.load(sample['sph_emb'])
+        sph_embed = torch.from_numpy(sph_embed)
+        sample.update({"sph_embed": sph_embed})
+        yield sample
+
 def process_text_feats(data: Iterator[Dict]) -> Iterator[Dict]:
     for sample in data:
         if 'self_crpt_material' in sample:
@@ -444,7 +451,7 @@ def process_sampled_keyword_from_label(
 
 # Process: sample keyword from continues label
 def process_sampled_keyword_from_label_md(
-        data: Iterator[Dict], positive_prob: float=0.5, neg_len: int = None, target_level: list=[], special_token: Dict = {}, aux_lexicon: Dict = {}, 
+        data: Iterator[Dict], positive_prob: float=0.5, neg_len: int = None, target_level: list=[], special_token: Dict = {}, aux_lexicon: Dict = {}, aux_lexicon_dict: Dict = {}, 
         sample_func_choice: Dict=None, neg_sample_func_choice: Dict=None
 ):
     # TEXT_SPEC_TOKEN = {'sos','eos','sok', 'eok', 'unk'}
@@ -452,35 +459,22 @@ def process_sampled_keyword_from_label_md(
     TEXT_SPEC_TOKEN.update(special_token)
     for sample in data:
         new_phn_label = copy.deepcopy(sample['phn_label'])
-        new_segment_label = copy.deepcopy(sample['segment_label'])
-        new_bpe_label = copy.deepcopy(sample['bpe_label'])
-        bpe_candidate = copy.deepcopy(sample['b_kw_candidate'])
+        new_segment_label = copy.deepcopy(sample['segment_label']) if 'segment_label' in sample else None
+        new_bpe_label = copy.deepcopy(sample['bpe_label']) if 'bpe_label' in sample else None
+        bpe_candidate = copy.deepcopy(sample['b_kw_candidate']) if 'b_kw_candidate' in sample else None
         num_pre_sample = 5
         corrupt_label = None if 'mix_phn_label' not in sample else sample['mix_phn_label']
         kw, kw_pos, kw_length, pos, target = utils.make_keyword_md(
             candidate_seq=new_phn_label, segment_seq=new_segment_label,
-            positive_prob=positive_prob, num_pre_sample=num_pre_sample, kw_position_candidate=sample['kw_candidate'],
-            corrupt_label=corrupt_label, aux_lexicon=aux_lexicon,
+            positive_prob=positive_prob, aux_lexicon=aux_lexicon_dict,
             sample_func_choice=sample_func_choice, neg_sample_func_choice=neg_sample_func_choice, target_level=target_level
         )
-        # if len(kw) != len(target):
-        #     print("process_sampled_keyword_from_label_md() -> ======== keyword: {}, target: {}".format(kw, target))
-        #     exit()
-        # if len(utils.unfold_list(kw)) != len(utils.unfold_list(target.tolist())):
-        #     print("process_sampled_keyword_from_label_md() -> ============== keyword: {}, target: {}".format(kw, target))
-        #     exit()
+
         kw, new_phn_label, new_bpe_label, kw_pos, kw_spec_mask = utils.inject_special_token_md(
             keyword=kw, keyword_length=kw_length, positive=pos, label=new_phn_label, 
             keyword_pos=kw_pos, special_token=special_token,  bpe_label=new_bpe_label, bpe_candidate=bpe_candidate
         )
-        # print("process_sampled_keyword_from_label_md() -> keyword len: {}, target len: {}".format(len(kw), len(target)))
-        # if len(kw) != 2 * len(target):
-        #     print("process_sampled_keyword_from_label_md() -> ============== keyword: {}, target: {}".format(kw, target))
-        #     exit()
 
-        # if len(utils.unfold_list(kw)) != 2* len(utils.unfold_list(target.tolist())):
-        #     print("process_sampled_keyword_from_label_md() -> ============== keyword: {}, target: {}".format(kw, target))
-        #     exit()
         sample.update({'keyword': kw, 'phn_label': new_phn_label, 'bpe_label': new_bpe_label, 'target': target, 'kw_spec_mask': kw_spec_mask}) 
         yield sample
 

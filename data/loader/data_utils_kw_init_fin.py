@@ -72,7 +72,7 @@ def tensor2str(t: torch.Tensor):
     return t
 
 # sample positive keyword from asr label
-def sample_kw_from_label(label: List, segment: List, kw_candidate: List=None, min_keyword_len: int=2, max_keyword_len: int=6)->Tuple[List, int]:
+def sample_kw_from_label(label: List, segment: List, min_keyword_len: int=2, max_keyword_len: int=6)->Tuple[List, int]:
     #match_len = 0
     #while match_len == 0:
     #segment = set_length_range(segment, min_keyword_len, max_keyword_len)
@@ -88,7 +88,13 @@ def sample_kw_from_label(label: List, segment: List, kw_candidate: List=None, mi
     return (kw, kw_pos)
 
 # sample positive keyword from asr label
-def sample_kw_using_whole_label(label: List, segment: List, kw_candidate: List=None, min_keyword_len: int=2, max_keyword_len: int=6)->Tuple[List, int]:
+def sample_kw_using_whole_label_from_label(label: List, segment: List)->Tuple[List, int]: 
+    kw_pos = 0
+
+    return (label, kw_pos)
+
+# sample positive keyword from asr label
+def sample_kw_using_whole_label(label: List, segment: List, min_keyword_len: int=2, max_keyword_len: int=6)->Tuple[List, int]:
     #match_len = 0
     #while match_len == 0:
     #segment = set_length_range(segment, min_keyword_len, max_keyword_len)
@@ -211,6 +217,27 @@ def substitution_neg_by_lex(positive_keyword: List[int], aux_lexicon) -> List[in
             keyword.extend(unfold_list(one_sub_word))
             target.extend(one_sub_target)
     # target = torch.tensor(target)
+    return keyword, target
+
+def substitution_neg_by_phone2id(positive_keyword: List[int], aux_lexicon: Dict, p_change: float = 0.5, is_skip_unk: bool = True) -> Tuple[List[int], List[int]]:
+    phone2id = aux_lexicon.get('phone2id', {})
+    if is_skip_unk:
+        phone2id = {k: v for k, v in phone2id.items() if k != 'unk'}
+    phone_ids = list(phone2id.values())
+    keyword = []
+    target = []
+    for phone_id in positive_keyword:
+        if phone_id not in phone_ids:
+            keyword.append(phone_id)
+            target.append(1)
+            continue
+        if random.random() >= p_change:
+            keyword.append(phone_id)
+            target.append(1)
+        else:
+            phone_ids_exclude = [p for p in phone_ids if p != phone_id]
+            keyword.append(random.choice(phone_ids_exclude))
+            target.append(0)
     return keyword, target
 
 # transform positive keyword to negative keyword by substitution according to given lexicon, under pinyin shengyun constraint, including:
@@ -608,7 +635,8 @@ NEG_FAMILY = {0: substitution_neg, 1: deletion_neg, 2: insertion_neg, 3: shuffle
 # Map method names to functions
 MD_SAMPLING_FUNCTIONS = {
     'sample_kw_from_label': sample_kw_from_label,
-    'sample_kw_using_whole_label': sample_kw_using_whole_label
+    'sample_kw_using_whole_label': sample_kw_using_whole_label,
+    'sample_kw_using_whole_label_from_label': sample_kw_using_whole_label_from_label
 }
 
 # 2) MD negative sampling (for make_keyword_md's negative branch)
@@ -619,6 +647,7 @@ MD_NEG_SAMPLING_FUNCTIONS = {
     'substitution_neg_by_lex_shengyun_constraint': substitution_neg_by_lex_shengyun_constraint,  # existing function
     'substitution_neg_by_lex_shengyun_constraint_tone': substitution_neg_by_lex_shengyun_constraint_tone,  # existing function
     'substitution_neg_md': substitution_neg_md,          # existing function
+    'substitution_neg_by_phone2id': substitution_neg_by_phone2id,          # existing function
 }
 
 # Return the full chosen choice dict (e.g., {'name': 'xxx', 'prob': 0.7, 'params': {...}})
@@ -1177,7 +1206,7 @@ def snipe_edge(waveform: torch.Tensor, hop_length: int=160):
     edges = num_samples % hop_length
     return waveform[:,0:num_samples-edges]
 
-def sample_keyword(candidate_seq: List[Any], segment_seq: List[Any], kw_position_candidate: List=None,
+def sample_keyword(candidate_seq: List[Any], segment_seq: List[Any], 
                     sample_func_choice: Dict=None) -> Tuple[List, int]:
     # Pick a function via YAML choices (with optional per-function params)
     choice = _pick_choice_from_choices(sample_func_choice)
@@ -1186,16 +1215,15 @@ def sample_keyword(candidate_seq: List[Any], segment_seq: List[Any], kw_position
     fn = MD_SAMPLING_FUNCTIONS.get(func_name, sample_kw_from_label)
     func_kwargs = _filter_kwargs_by_signature(fn, func_params)
 
-    return fn(candidate_seq, segment_seq, kw_position_candidate, **func_kwargs)
+    return fn(candidate_seq, segment_seq, **func_kwargs)
 
 def make_keyword_md(
         candidate_seq: List[Any], segment_seq: List[Any],
-        positive_prob: float, num_pre_sample: Optional[int]=None, kw_position_candidate: List=None,
-        corrupt_label: List=None, aux_lexicon: Dict=None, 
+        positive_prob: float, aux_lexicon: Dict=None, 
         sample_func_choice: Dict=None, neg_sample_func_choice: Dict=None, target_level: List=None
     ) -> Tuple[List, int, int, bool, List]:
 
-    keyword, keyword_pos = sample_keyword(candidate_seq, segment_seq, kw_position_candidate, sample_func_choice)
+    keyword, keyword_pos = sample_keyword(candidate_seq, segment_seq, sample_func_choice)
     # keyword_unfold = unfold_list(keyword)
     pos = True
     # target = torch.tensor([1]*len(keyword_unfold))

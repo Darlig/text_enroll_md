@@ -214,10 +214,6 @@ def Dataset(conf: Dict,  d_list: List) -> Tuple[Any, ...]:
         rirs_list = read_list(rirs_list)
         data_list_config.update({'rirs_list': rirs_list})
 
-    if sph_config.get('aux_lexicon', False):
-        aux_lexicon = sph_config['aux_lexicon']
-        aux_lexicon = json.load(open(aux_lexicon))
-        
 
     # Build data list
     dataset = DataList(**data_list_config)
@@ -228,8 +224,14 @@ def Dataset(conf: Dict,  d_list: List) -> Tuple[Any, ...]:
     if len(corruption_config) > 0:
         dataset = Processer(dataset, factory.process_corruption, corruption_config)
 
-    # prepare speech feats
-    dataset = Processer(dataset, factory.process_speech_feats, sph_config)
+    if sph_config.get('data_type', False) == 'raw':
+        # prepare speech feats
+        dataset = Processer(dataset, factory.process_speech_feats, sph_config)
+    elif sph_config.get('data_type', False) == 'embedding':
+        # prepare speech embedding
+        dataset = Processer(dataset, factory.process_speech_embedding, sph_config)
+    else:
+        raise NotImplementedError("speech data type should be 'raw' or 'embedding'")
 
     # prepare text feats, such as label, keyword etc.
     text_config = conf.get('text_config', {})
@@ -244,8 +246,11 @@ def Dataset(conf: Dict,  d_list: List) -> Tuple[Any, ...]:
         if keyword_format == 'sample':
             crpt_list = copy.deepcopy(d_list)
             random.shuffle(crpt_list)
+            if keyword_config.get('aux_lexicon', False):
+                aux_lexicon = keyword_config['aux_lexicon']
+                aux_lexicon = json.load(open(aux_lexicon))
+                keyword_config.update({'aux_lexicon_dict': aux_lexicon})
             keyword_config.update({'neg_len': 70})
-            keyword_config.update({'aux_lexicon': aux_lexicon})
             dataset = Processer(dataset, factory.process_sampled_keyword_from_label_md,  **keyword_config)
         elif keyword_format == 'fix':
             dataset = Processer(dataset, factory.process_fix_keyword, **keyword_config)

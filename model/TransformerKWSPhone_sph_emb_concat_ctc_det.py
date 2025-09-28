@@ -72,7 +72,7 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         num_au_kw_concat_block=4,
         sok=1,
         eok=1,
-        loss_weight=[0.3,0.7],
+        loss_weight={'ctc_loss': 0.3, 'det_loss': 0.7},
         **kwargs,
     ):
         super(TransformerKWSPhone_sph_emb_concat_ctc_det, self).__init__()
@@ -103,7 +103,9 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         au_kw_feed_forward_config = au_kw_transformer_config['feed_forward_config']
         au_kw_hidden_dim = au_kw_transformer_config['size']
 
-        self.l1, self.l2 = loss_weight
+        # self.l1, self.l2 = loss_weight
+        self.ctc_weight = loss_weight['ctc_loss']
+        self.det_weight = loss_weight['det_loss']
 
         # # audio net
         # self.au_conv = nn.Sequential(
@@ -340,7 +342,7 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         )
 
         # decoder output 
-        total_loss = (0.3 * phn_ctc_loss) + (0.7 * det_loss)
+        total_loss = (self.ctc_weight * phn_ctc_loss) + (self.det_weight * det_loss)
         detail_loss['phn_ctc_loss'] = phn_ctc_loss.clone().detach()
 
         return total_loss, detail_loss

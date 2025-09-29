@@ -34,7 +34,7 @@ def make_datalist(phnid_seq_dict, embedding_scp, out_datalist):
             one_obj = {
                 'key': key,
                 'phn_label': phnid_seq,
-                'embedding': embedding_path
+                'sph_emb': embedding_path
             }
             f_datalist.write(f"{json.dumps(one_obj)}\n")
             # f_datalist.write(f"{key} {phn_seq} {embedding_path}\n")

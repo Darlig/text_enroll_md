@@ -34,7 +34,7 @@ def make_datalist(phnid_seq_dict, embedding_scp, out_datalist):
             one_obj = {
                 'key': key,
                 'phn_label': phnid_seq,
-                'embedding': embedding_path
+                'sph_emb': embedding_path
             }
             f_datalist.write(f"{json.dumps(one_obj)}\n")
             # f_datalist.write(f"{key} {phn_seq} {embedding_path}\n")
@@ -87,8 +87,10 @@ def main(text_scp, lexicon, phones, embedding_scp, out_phone2id, out_datalist):
 
     phn_seq_dict = {}
     oov_words = set()
+    n_invalid_utt = 0
     for key, text in text_dict.items():
         phn_seq = []
+        invalid_utt = False
         for word in text.split():
             word = re.sub('[0-9\.,?!:;"]', '', word)
             word = word.lower()
@@ -101,9 +103,15 @@ def main(text_scp, lexicon, phones, embedding_scp, out_phone2id, out_datalist):
                     phn_seq.extend(word_phn)
             else:
                 oov_words.add(word)
+                invalid_utt = True
+                break
+        if invalid_utt:
+            n_invalid_utt += 1
+            continue
         phn_seq_dict[key] = phn_seq
     print(f"num of oov words: {len(oov_words)}")
     print(f"first 10 oov words: {list(oov_words)[:10]}")
+    print("skipped {} utts for oov word".format(n_invalid_utt))
 
     phnid_seq_dict = {}
     oov_phones = set()

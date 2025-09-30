@@ -107,7 +107,7 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         self.ctc_weight = loss_weight['ctc_loss']
         self.det_weight = loss_weight['det_loss']
 
-        # # audio net
+        # audio net
         # self.au_conv = nn.Sequential(
         #     torch.nn.Conv2d(1, au_hidden_dim, 3, 2),
         #     torch.nn.ReLU(),
@@ -119,7 +119,7 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         # self.au_trans = NM.FNNBlock(
         #     **au_input_trans_config
         # )
-        # self.au_pos_emb = NM.PositionalEncoding(au_hidden_dim)
+        self.au_pos_emb = NM.PositionalEncoding(au_hidden_dim)
 
         # self.au_transformer = nn.ModuleList([
         #     NM.TransformerLayer(
@@ -299,7 +299,7 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         kw_emb = self.kw_trans(kw_emb)
 
         # add position embedding
-        # sph_emb = self.au_pos_emb(sph_emb)
+        sph_emb = self.au_pos_emb(sph_emb)
         kw_emb = self.kw_pos_emb(kw_emb)
 
         kw_emb = self.forward_transformer(

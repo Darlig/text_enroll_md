@@ -350,18 +350,18 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
 
     @torch.no_grad()
     def evaluate(self, input_data):
-        sph_input, sph_len, kw_label, kw_len, kw_spec_mask = input_data
-        b,t,d = sph_input.size()
-        sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
-        sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
+        sph_emb, sph_len, kw_label, kw_len, kw_spec_mask = input_data
+        b,t,d = sph_emb.size()
+        # sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
+        # sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
         sph_mask = ~NM.make_mask(sph_len).unsqueeze(1)
         kw_mask = ~NM.make_mask(kw_len).unsqueeze(1)
 
         # embedding
-        sph_emb = self.au_conv(sph_input.unsqueeze(1))
-        b, c, t, d = sph_emb.size()
-        sph_emb = self.au_conv_trans(sph_emb.transpose(1,2).contiguous().view(b, t, c * d))
-        sph_emb = self.au_trans(sph_emb)
+        # sph_emb = self.au_conv(sph_input.unsqueeze(1))
+        # b, c, t, d = sph_emb.size()
+        # sph_emb = self.au_conv_trans(sph_emb.transpose(1,2).contiguous().view(b, t, c * d))
+        # sph_emb = self.au_trans(sph_emb)
         kw_emb = self.phn_emb(kw_label.to(torch.long))
         kw_emb = self.kw_trans(kw_emb)
 
@@ -374,7 +374,7 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
             kw_emb,
             mask=kw_mask,
         )
-        sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
+        # sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
         sph_kw_emb = torch.cat([kw_emb, sph_emb], dim=1)
         sph_kw_mask = torch.cat([kw_mask, sph_mask], dim=-1)
         for i, tf_layer in enumerate(self.au_kw_transformer):

@@ -76,16 +76,26 @@ def result_extract(det_result, target_level):
         det_result = det_result[1:]
     return det_result
 
-def inference(model, wav_path, phones_int, target_level, special_token, is_decode=False, is_gop=False):
+def inference(model, speech_path, phones_int, target_level, special_token, is_decode=False, is_gop=False, is_sph_embed=False):
     with torch.no_grad():
-        # Load wav file
-        wav = torchaudio.load(wav_path)[0]
-        # Compute fbank features
-        fbank = kaldi.fbank(wav, **FBANK_DEFAULT_SETTING)
+        if not is_sph_embed:
+            # Load wav file
+            wav = torchaudio.load(speech_path)[0]
+            # Compute fbank features
+            fbank = kaldi.fbank(wav, **FBANK_DEFAULT_SETTING)
 
-        fbank = fbank.unsqueeze(0).to('cuda:0')
-        fbank_len = torch.tensor([fbank.size(1)])
-        # print("fbank shape: {}".format(fbank.shape))
+            fbank = fbank.unsqueeze(0).to('cuda:0')
+            fbank_len = torch.tensor([fbank.size(1)])
+            # print("fbank shape: {}".format(fbank.shape))
+            speech = fbank
+            speech_len = fbank_len
+        else:
+            sph_embed = np.load(speech_path)
+            sph_embed = torch.from_numpy(sph_embed)
+            sph_embed = sph_embed.unsqueeze(0).to('cuda:0')
+            sph_embed_len = torch.tensor([sph_embed.size(1)])
+            speech = sph_embed
+            speech_len = sph_embed_len
         phones_int = [int(ph) for ph in phones_int]
         # print("phones_int shape: {}".format(len(phones_int)))
         # print("phones_int: {}".format(phones_int))
@@ -98,7 +108,7 @@ def inference(model, wav_path, phones_int, target_level, special_token, is_decod
         kw_spec_mask = torch.tensor(kw_spec_mask, dtype=torch.int64, device='cuda:0').unsqueeze(0)
         # phones_accuracy = torch.tensor(phones_accuracy, dtype=torch.float32, device='cuda:0').unsqueeze(0)
 
-        input = (fbank, fbank_len, phones_int, phones_len, kw_spec_mask)
+        input = (speech, speech_len, phones_int, phones_len, kw_spec_mask)
         input_data = (d.to('cuda:0') for d in input)
         det_result, hyp_result = model.evaluate(input_data)
         if is_decode:
@@ -118,11 +128,11 @@ def inference(model, wav_path, phones_int, target_level, special_token, is_decod
         return det_result, hyp_result, asr_result, gop_result
 
 
-def test_md(model, wav_scp_path, phone_path, human_label_path, result_label_score_path, target_level, special_token, is_decode=False, is_gop=False):
+def test_md(model, speech_scp_path, phone_path, human_label_path, result_label_score_path, target_level, special_token, is_decode=False, is_gop=False, is_sph_embed=False):
     if os.path.exists(result_label_score_path):
         print("Result file already exists: {}. Skip md test.".format(result_label_score_path))
         return
-    data_list = load_dataset(wav_scp_path, phone_path, human_label_path)
+    data_list = load_dataset(speech_scp_path, phone_path, human_label_path)
     print("Loaded {} utterances for testing.".format(len(data_list)))
     result_dir = os.path.dirname(result_label_score_path)
     result_decode_path = os.path.join(result_dir, 'result_decode.txt')
@@ -134,15 +144,15 @@ def test_md(model, wav_scp_path, phone_path, human_label_path, result_label_scor
         f_refer = open(reference_path, 'w')
     if is_gop:
         f_gop = open(result_gop_path, 'w')
-    for n, (uttid, wav_path, phones_int, phones_accuracy) in enumerate(data_list):
+    for n, (uttid, speech_path, phones_int, phones_accuracy) in enumerate(data_list):
         if n % 2000 == 0:
             print("Inferencing {}th utterance: {}".format(n, uttid))
         try:
-            det_result, hyp_result, asr_result, gop_result = inference(model, wav_path, phones_int, target_level, special_token, is_decode, is_gop)
+            det_result, hyp_result, asr_result, gop_result = inference(model, speech_path, phones_int, target_level, special_token, is_decode, is_gop, is_sph_embed)
         except Exception as e:
             print(f"Error processing {uttid}: {e}")
             continue
-        # print("utt: {}, phones: {}, det_result: {}".format(uttid, phones_int, det_result))
+        print("utt: {}, phones: {}, det_result: {}".format(uttid, phones_int, det_result))
         for i in range(len(det_result)):
             f_score.write("{}.{}\t{}\t{}\t{}\n".format(uttid, i, phones_accuracy[i], det_result[i], phones_int[i]))
         if is_decode:
@@ -325,7 +335,7 @@ def plot_pr_curve_and_analysis(ref_score, hyp_score, test_result_dir, analysis_i
     return selected_points
 
 
-def plot_pr_curve_for_paper(ref_score, hyp_score, test_result_dir, analysis_id, word_py, target_precision):
+def plot_pr_curve_for_paper(ref_score, hyp_score, test_result_dir, analysis_id, word_py, target_precision, epsilon=0):
     """
     Plots a visually enhanced Precision-Recall (PR) curve suitable for academic papers.
     It also identifies and highlights specific points based on a target precision.
@@ -356,7 +366,6 @@ def plot_pr_curve_for_paper(ref_score, hyp_score, test_result_dir, analysis_id, 
     # Plot the main PR curve
     plt.plot(recall, precision, color='#1f77b4', lw=2.5, label='PR Curve')
     
-    epsilon = 0.03
     mask = (precision >= epsilon) & (recall >= epsilon) & (recall <= 1 - epsilon)
         
     # 获取过滤后的索引
@@ -659,7 +668,7 @@ def compute_dcf(y_true, y_scores, cost_miss, cost_fa, prior_target, analysis_id)
     # f_out_csv.write("{}\n".format(", ".join([str(word_id), str(roc_auc), str(cost_miss), str(cost_fa), str(prior_target), str(dcf), str(dcf_threshold), str(1-tpr[dcf_index]), str(fpr[dcf_index]), str(fpr[dcf_index]*shift_per_hour)])))
 
 
-def result_analysis(result_label_score_path, is_gop=False, target_precision=0.21):
+def result_analysis(result_label_score_path, is_gop=False, target_precision=0, pr_epsilon=0):
     all_results = []
     # y_true = []
     # y_scores = []
@@ -680,7 +689,7 @@ def result_analysis(result_label_score_path, is_gop=False, target_precision=0.21
         print(len(y_true), len(y_scores))
     analysis_id = "analysis" if not is_gop else "gop_analysis"
     plot_roc_curve_for_paper(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all")
-    selected_points = plot_pr_curve_for_paper(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all", target_precision)
+    selected_points = plot_pr_curve_for_paper(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all", target_precision, epsilon=pr_epsilon)
     plot_det_curve_for_paper(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all")
     plot_sample_distribution(y_true, y_scores, os.path.dirname(result_label_score_path), analysis_id, "all")
     compute_dcf(
@@ -702,6 +711,10 @@ if __name__ == '__main__':
     target_precision = test_config.get('target_precision', 0.21)
     default_target_level = ['phone']
     default_special_token = {'sop': 1}
+    is_sph_embed = True if 'sph_emb_scp' in test_config else False
+    speech_scp = test_config['wav_scp'] if not is_sph_embed else test_config['sph_emb_scp']
+    pr_epsilon = test_config.get('pr_epsilon', 0.03)
+
     if 'target_level' in keyword_config:
         target_level = keyword_config['target_level']
     else:
@@ -719,16 +732,17 @@ if __name__ == '__main__':
     test_model.eval()
     test_md(
         test_model,
-        test_config['wav_scp'],
+        speech_scp,
         test_config['phone'],
         test_config['human_label'],
         result_label_score_path,
         target_level,
         special_token,
         is_decode=test_config.get('is_decode', False),
-        is_gop=test_config.get('is_gop', False)
+        is_gop=test_config.get('is_gop', False),
+        is_sph_embed=is_sph_embed
     )
-    result_analysis(result_label_score_path, target_precision=target_precision)
+    result_analysis(result_label_score_path, target_precision=target_precision, pr_epsilon=pr_epsilon)
     if test_config.get('is_gop', False):
         gop_result_label_score_path = os.path.join(os.path.dirname(result_label_score_path), 'result_gop.txt')
-        result_analysis(gop_result_label_score_path, is_gop=True, target_precision=target_precision)
+        result_analysis(gop_result_label_score_path, is_gop=True, target_precision=target_precision, pr_epsilon=pr_epsilon)

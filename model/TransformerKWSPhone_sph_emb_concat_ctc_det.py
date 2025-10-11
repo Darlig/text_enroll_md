@@ -81,11 +81,7 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         # detach_config 
         # TODO: looks stupid ....   >_<
         # audio config
-        # au_input_trans_config = audio_net_config['input_trans']
         au_transformer_config = audio_net_config['transformer_config']
-        # au_self_att = att_dict[au_transformer_config['self_att']]
-        # au_self_att_cofing = au_transformer_config['self_att_config']
-        # au_feed_forward_config = au_transformer_config['feed_forward_config']
         au_hidden_dim = au_transformer_config['size']
 
         # vocab config
@@ -108,26 +104,7 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         self.det_weight = loss_weight['det_loss']
 
         # audio net
-        # self.au_conv = nn.Sequential(
-        #     torch.nn.Conv2d(1, au_hidden_dim, 3, 2),
-        #     torch.nn.ReLU(),
-        #     torch.nn.Conv2d(au_hidden_dim, au_hidden_dim, 3, 2),
-        #     torch.nn.ReLU(),
-        # )
-        # self.au_conv_trans = nn.Linear(au_hidden_dim * (((40 - 1) // 2 - 1) // 2), au_hidden_dim)
-
-        # self.au_trans = NM.FNNBlock(
-        #     **au_input_trans_config
-        # )
         self.au_pos_emb = NM.PositionalEncoding(au_hidden_dim)
-
-        # self.au_transformer = nn.ModuleList([
-        #     NM.TransformerLayer(
-        #         size=au_hidden_dim,
-        #         self_att=au_self_att(**au_self_att_cofing),
-        #         feed_forward=NM.FNNBlock(**au_feed_forward_config),
-        #     ) for _ in range(num_audio_self_block)
-        # ])
 
         # kw net
         self.phn_emb = NM.WordEmbedding(
@@ -290,11 +267,7 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         kw_loss_mask_flat = kw_loss_mask.reshape(-1)
         target_select = torch.cat([target[i][:j] for i, j in enumerate(target_len)], dim=0).to(torch.float32)
 
-        # embedding
-        # sph_emb = self.au_conv(sph_input.unsqueeze(1))
-        # b, c, t, d = sph_emb.size()
-        # sph_emb = self.au_conv_trans(sph_emb.transpose(1,2).contiguous().view(b, t, c * d))
-        # sph_emb = self.au_trans(sph_emb)
+        # keyword embedding
         kw_emb = self.phn_emb(kw_label.to(torch.long))
         kw_emb = self.kw_trans(kw_emb)
 
@@ -307,43 +280,32 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
             kw_emb,
             mask=kw_mask,
         )
-        # sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
+
         sph_kw_emb = torch.cat([kw_emb, sph_emb], dim=1)
         sph_kw_mask = torch.cat([kw_mask, sph_mask], dim=-1)
-        #sph_kw_emb = self.au_kw_pos_emb(sph_kw_emb)
-        det_loss = 0
-        detail_loss = {}
-        for i, tf_layer in enumerate(self.au_kw_transformer):
-            sph_kw_emb, _ = tf_layer(sph_kw_emb, sph_kw_mask, cross_input=None)
+        sph_kw_emb = self.forward_transformer(
+            self.au_kw_transformer,
+            sph_kw_emb,
+            mask=sph_kw_mask,
+        )
 
-            # detection loss
-
-            det_logit_layer = self.det_net(sph_kw_emb[:,0:kw_emb.size(1),:])
-            det_logit_layer_flat = det_logit_layer[:,:,0].reshape(-1)
-            # print("det_logit_layer: {}".format(det_logit_layer))
-            # print("kw_loss_mask_flat: {}".format(kw_loss_mask_flat))
-            det_logit_layer_select = det_logit_layer_flat[kw_loss_mask_flat]
-
-            # print("det_logit_layer_select size: {}".format(det_logit_layer_select.size()))
-            # print("target_select size: {}".format(target_select.size()))
-            # print("det_logit_layer_select: {}".format(det_logit_layer_select))
-            # print("target_select: {}".format(target_select))
-            det_loss_layer = self.det_crit(det_logit_layer_select, target_select)
-            # kw_loss_mask = ((~kw_mask.squeeze(1)) & (kw_spec_mask > 0)).to(torch.float32)
-            # det_loss_layer = (det_loss_layer * kw_loss_mask).sum() / kw_spec_mask.sum()
-            det_loss += det_loss_layer / len(self.au_kw_transformer)
-            detail_loss['det_loss_layer_{}'.format(i)] = det_loss_layer.clone().detach()
-        
-        sph_emb = sph_kw_emb[:,kw_emb.size(1):,:]
+        # detection loss
+        det_logit = self.det_net(sph_kw_emb[:,0:kw_emb.size(1),:])
+        det_logit_flat = det_logit[:,:,0].reshape(-1)
+        det_logit_select = det_logit_flat[kw_loss_mask_flat]
+        det_loss = self.det_crit(det_logit_select, target_select)
 
         # asr loss
+        sph_emb = sph_kw_emb[:,kw_emb.size(1):,:]
         phn_ctc_loss, phn_asr_hyp = self.phn_asr_crit(
             sph_emb, phn_label, sph_len, phn_len, return_hyp=True
         )
 
-        # decoder output 
+        # total loss
         total_loss = (self.ctc_weight * phn_ctc_loss) + (self.det_weight * det_loss)
+        detail_loss = {}
         detail_loss['phn_ctc_loss'] = phn_ctc_loss.clone().detach()
+        detail_loss['det_loss'] = det_loss.clone().detach()
 
         return total_loss, detail_loss
     
@@ -358,10 +320,6 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         kw_mask = ~NM.make_mask(kw_len).unsqueeze(1)
 
         # embedding
-        # sph_emb = self.au_conv(sph_input.unsqueeze(1))
-        # b, c, t, d = sph_emb.size()
-        # sph_emb = self.au_conv_trans(sph_emb.transpose(1,2).contiguous().view(b, t, c * d))
-        # sph_emb = self.au_trans(sph_emb)
         kw_emb = self.phn_emb(kw_label.to(torch.long))
         kw_emb = self.kw_trans(kw_emb)
 
@@ -372,13 +330,15 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         kw_emb = self.forward_transformer(
             self.kw_transformer,
             kw_emb,
-            mask=kw_mask,
+            mask=kw_mask
         )
-        # sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
         sph_kw_emb = torch.cat([kw_emb, sph_emb], dim=1)
         sph_kw_mask = torch.cat([kw_mask, sph_mask], dim=-1)
-        for i, tf_layer in enumerate(self.au_kw_transformer):
-            sph_kw_emb, _ = tf_layer(sph_kw_emb, sph_kw_mask, cross_input=None)
+        sph_kw_emb = self.forward_transformer(
+            self.au_kw_transformer,
+            sph_kw_emb,
+            mask=sph_kw_mask
+        )
 
         det_result = self.det_net(sph_kw_emb[:,0:kw_emb.size(1),:])[:,:,0]
         selected_list = []

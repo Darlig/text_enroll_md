@@ -12,9 +12,9 @@ dependencies:
   - scikit-learn=1.5.1
   - matplotlib=
   - torchmetrics=1.4.0.post0
-  - pypinyin
   - pip:
     - pyyaml-include==1.3
     - soundfile==0.12.1
     - tensorboard
+    - pypinyin
     - git+https://github.com/openai/whisper.git

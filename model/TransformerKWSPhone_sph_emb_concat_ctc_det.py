@@ -146,7 +146,7 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         self.det_net = nn.Sequential(
             NM.FNNBlock(**kw_feed_forward_config), nn.Linear(kw_hidden_dim, 1)
         )
-        self.det_crit = nn.BCEWithLogitsLoss(reduction='mean')
+        self.det_crit = nn.BCEWithLogitsLoss(reduction='none')
 
 
     def forward_transformer(
@@ -287,7 +287,10 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         # detection loss
         det_logit = self.det_net(sph_kw_emb[:,0:kw_emb.size(1),:])
         det_logit = det_logit[:,:,0]
+        # 使用mask排除padding位置
+        det_loss_mask = kw_mask.squeeze(1)
         det_loss = self.det_crit(det_logit, target.to(torch.float32))
+        det_loss = (det_loss * det_loss_mask).sum() / det_loss_mask.sum()
 
         # asr loss
         sph_emb = sph_kw_emb[:,kw_emb.size(1):,:]

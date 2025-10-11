@@ -1155,18 +1155,12 @@ def inject_special_token_md(
         positive: bool=True, keyword_pos: int=None, special_token: Dict={}, bpe_label: List=None, 
         bpe_candidate: List=None
     )->Tuple[List, List, List, int, List]:
-    # print(keyword)
-    # exit()
     org_keyword_len = len(keyword)
     TEXT_SPEC_TOKEN.update(special_token)
     new_phn_label = copy.deepcopy(label)
     new_bpe_label = copy.deepcopy(bpe_label) if bpe_label else [0]
     new_keyword = copy.deepcopy(keyword)
     kw_spec_mask = [0] * org_keyword_len
-    # if (not positive) and (TEXT_SPEC_TOKEN['punk'] != None):
-    #     new_phn_label = torch.tensor([TEXT_SPEC_TOKEN['punk'] for x in range(len(new_phn_label)//3)])
-    #     if bpe_label:
-    #         new_bpe_label = torch.tensor([TEXT_SPEC_TOKEN['unk']  for x in range(len(new_bpe_label)//3)])
 
     if TEXT_SPEC_TOKEN['sos'] != None: # start of sentence
         new_phn_label = [TEXT_SPEC_TOKEN['sos']] + new_phn_label

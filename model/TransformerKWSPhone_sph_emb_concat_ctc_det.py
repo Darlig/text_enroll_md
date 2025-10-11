@@ -252,7 +252,7 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
 
     def forward(self, input_data):
 
-        sph_emb, sph_len, phn_label, phn_len, kw_label, kw_len, kw_spec_mask, target, target_len = input_data
+        sph_emb, sph_len, phn_label, phn_len, kw_label, kw_len, target = input_data
         # if torch.any(sph_len < 3):
         #     print(f"Rank {dist.get_rank()}: Skipping batch with invalid sph_len={sph_len}")
         #     return None, None
@@ -261,11 +261,6 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         # sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
         sph_mask = ~NM.make_mask(sph_len).unsqueeze(1)
         kw_mask = ~NM.make_mask(kw_len).unsqueeze(1)
-        # print("kw_len: {}, kw_label: {}, kw_spec_mask: {}, target: {}".format(kw_len, kw_label, kw_spec_mask, target))
-        kw_loss_mask = ((~NM.make_mask(kw_len)) & (kw_spec_mask > 0))
-        # print("kw_loss_mask: {}".format(kw_loss_mask))
-        kw_loss_mask_flat = kw_loss_mask.reshape(-1)
-        target_select = torch.cat([target[i][:j] for i, j in enumerate(target_len)], dim=0).to(torch.float32)
 
         # keyword embedding
         kw_emb = self.phn_emb(kw_label.to(torch.long))
@@ -291,9 +286,8 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
 
         # detection loss
         det_logit = self.det_net(sph_kw_emb[:,0:kw_emb.size(1),:])
-        det_logit_flat = det_logit[:,:,0].reshape(-1)
-        det_logit_select = det_logit_flat[kw_loss_mask_flat]
-        det_loss = self.det_crit(det_logit_select, target_select)
+        det_logit = det_logit[:,:,0]
+        det_loss = self.det_crit(det_logit, target.to(torch.float32))
 
         # asr loss
         sph_emb = sph_kw_emb[:,kw_emb.size(1):,:]

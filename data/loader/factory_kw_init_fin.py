@@ -470,12 +470,12 @@ def process_sampled_keyword_from_label_md(
             sample_func_choice=sample_func_choice, neg_sample_func_choice=neg_sample_func_choice, target_level=target_level
         )
 
-        kw, new_phn_label, new_bpe_label, kw_pos, kw_spec_mask = utils.inject_special_token_md(
-            keyword=kw, keyword_length=kw_length, positive=pos, label=new_phn_label, 
-            keyword_pos=kw_pos, special_token=special_token,  bpe_label=new_bpe_label, bpe_candidate=bpe_candidate
-        )
+        # kw, new_phn_label, new_bpe_label, kw_pos, kw_spec_mask = utils.inject_special_token_md(
+        #     keyword=kw, keyword_length=kw_length, positive=pos, label=new_phn_label, 
+        #     keyword_pos=kw_pos, special_token=special_token,  bpe_label=new_bpe_label, bpe_candidate=bpe_candidate
+        # )
 
-        sample.update({'keyword': kw, 'phn_label': new_phn_label, 'bpe_label': new_bpe_label, 'target': target, 'kw_spec_mask': kw_spec_mask}) 
+        sample.update({'keyword': kw, 'phn_label': new_phn_label, 'target': target}) 
         yield sample
 
 # process permuate label

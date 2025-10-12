@@ -703,7 +703,7 @@ class Trainer():
                     det_result, hyp_result = self.model.evaluate(train_data)
                 # print("det_result: ", det_result)
                 # print("phn_asr_hyp: ", phn_asr_hyp)
-                keyword = self.strip_special_token(keyword[0], target_level)
+                keyword = keyword[0]
 
                 # if is_gop:
                     # gop_result = model.compute_gop(hyp_result, keyword)
@@ -712,7 +712,6 @@ class Trainer():
                 #     gop_result = None
                 det_result = det_result[0]
                 hyp_result = hyp_result.cpu().numpy()[0]
-                det_result = self.result_extract(det_result, target_level)
                 det_result = det_result.cpu().numpy()
                 # return det_result, hyp_result
                 for i in range(len(det_result)):

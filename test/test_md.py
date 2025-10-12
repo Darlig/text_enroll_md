@@ -76,7 +76,7 @@ def result_extract(det_result, target_level):
         det_result = det_result[1:]
     return det_result
 
-def inference(model, speech_path, phones_int, target_level, special_token, is_decode=False, is_gop=False, is_sph_embed=False):
+def inference(model, speech_path, phones_int, is_decode=False, is_gop=False, is_sph_embed=False):
     with torch.no_grad():
         if not is_sph_embed:
             # Load wav file
@@ -100,15 +100,13 @@ def inference(model, speech_path, phones_int, target_level, special_token, is_de
         # print("phones_int shape: {}".format(len(phones_int)))
         # print("phones_int: {}".format(phones_int))
         phones_int_org = phones_int.copy()
-        phones_int, kw_spec_mask = insert_special_token(phones_int, target_level, special_token)
         # print("phones_int after insert sop token: {}".format(phones_int))
         phones_len = torch.tensor([len(phones_int)])
         phones_int = torch.tensor(phones_int, dtype=torch.int64, device='cuda:0').unsqueeze(0)
         phones_int_org = torch.tensor(phones_int_org, dtype=torch.int64, device='cuda:0').unsqueeze(0)
-        kw_spec_mask = torch.tensor(kw_spec_mask, dtype=torch.int64, device='cuda:0').unsqueeze(0)
         # phones_accuracy = torch.tensor(phones_accuracy, dtype=torch.float32, device='cuda:0').unsqueeze(0)
 
-        input = (speech, speech_len, phones_int, phones_len, kw_spec_mask)
+        input = (speech, speech_len, phones_int, phones_len)
         input_data = (d.to('cuda:0') for d in input)
         det_result, hyp_result = model.evaluate(input_data)
         if is_decode:
@@ -123,12 +121,11 @@ def inference(model, speech_path, phones_int, target_level, special_token, is_de
             gop_result = None
         det_result = det_result[0]
         hyp_result = hyp_result.cpu().numpy()[0]
-        det_result = result_extract(det_result, target_level)
         det_result = det_result.cpu().numpy()
         return det_result, hyp_result, asr_result, gop_result
 
 
-def test_md(model, speech_scp_path, phone_path, human_label_path, result_label_score_path, target_level, special_token, is_decode=False, is_gop=False, is_sph_embed=False):
+def test_md(model, speech_scp_path, phone_path, human_label_path, result_label_score_path, is_decode=False, is_gop=False, is_sph_embed=False):
     if os.path.exists(result_label_score_path):
         print("Result file already exists: {}. Skip md test.".format(result_label_score_path))
         return
@@ -148,7 +145,7 @@ def test_md(model, speech_scp_path, phone_path, human_label_path, result_label_s
         if n % 2000 == 0:
             print("Inferencing {}th utterance: {}".format(n, uttid))
         try:
-            det_result, hyp_result, asr_result, gop_result = inference(model, speech_path, phones_int, target_level, special_token, is_decode, is_gop, is_sph_embed)
+            det_result, hyp_result, asr_result, gop_result = inference(model, speech_path, phones_int, is_decode, is_gop, is_sph_embed)
         except Exception as e:
             print(f"Error processing {uttid}: {e}")
             continue
@@ -715,16 +712,6 @@ if __name__ == '__main__':
     speech_scp = test_config['wav_scp'] if not is_sph_embed else test_config['sph_emb_scp']
     pr_epsilon = test_config.get('pr_epsilon', 0.03)
 
-    if 'target_level' in keyword_config:
-        target_level = keyword_config['target_level']
-    else:
-        print("No target_level in keyword_config, use default: {}".format(default_target_level))
-        target_level = default_target_level
-    if 'special_token' in keyword_config:
-        special_token = keyword_config['special_token']
-    else:
-        print("No special_token in keyword_config, use default: {}".format(default_special_token))
-        special_token = default_special_token
     if not os.path.exists(os.path.dirname(result_label_score_path)):
         os.makedirs(os.path.dirname(result_label_score_path))
 
@@ -736,8 +723,6 @@ if __name__ == '__main__':
         test_config['phone'],
         test_config['human_label'],
         result_label_score_path,
-        target_level,
-        special_token,
         is_decode=test_config.get('is_decode', False),
         is_gop=test_config.get('is_gop', False),
         is_sph_embed=is_sph_embed

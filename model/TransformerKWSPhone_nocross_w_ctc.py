@@ -248,8 +248,8 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
 
     @torch.no_grad()
     def evaluate(self, input_data):
-        sph_input, sph_len, kw_label, kw_len, kw_spec_mask = input_data
-        b,t,d = sph_input.size()
+        sph_input, sph_len, kw_label, kw_len = input_data
+        # b,t,d = sph_input.size()
         sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
         sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
         sph_mask = ~NM.make_mask(sph_len).unsqueeze(1)
@@ -282,11 +282,6 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
         )
 
         det_result = self.det_net(sph_kw_emb[:,0:kw_emb.size(1),:])[:,:,0]
-        selected_list = []
-        for bi in range(b):
-            sel_b = det_result[bi][kw_spec_mask[bi] > 0]
-            selected_list.append(sel_b)
-        det_result = pad_list(selected_list, 0.0).to(sph_kw_emb.device)
         det_result = torch.sigmoid(det_result)
         
         sph_emb = sph_kw_emb[:,kw_emb.size(1):,:]

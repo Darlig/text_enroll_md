@@ -99,7 +99,6 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         au_kw_feed_forward_config = au_kw_transformer_config['feed_forward_config']
         au_kw_hidden_dim = au_kw_transformer_config['size']
 
-        # self.l1, self.l2 = loss_weight
         self.ctc_weight = loss_weight['ctc_loss']
         self.det_weight = loss_weight['det_loss']
 
@@ -273,7 +272,7 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         kw_emb = self.forward_transformer(
             self.kw_transformer,
             kw_emb,
-            mask=kw_mask,
+            mask=kw_mask
         )
 
         sph_kw_emb = torch.cat([kw_emb, sph_emb], dim=1)
@@ -281,7 +280,7 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         sph_kw_emb = self.forward_transformer(
             self.au_kw_transformer,
             sph_kw_emb,
-            mask=sph_kw_mask,
+            mask=sph_kw_mask
         )
 
         # detection loss
@@ -345,10 +344,7 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         det_result = pad_list(selected_list, 0.0).to(sph_kw_emb.device)
         det_result = torch.sigmoid(det_result)
         
-        # print("det_result size: {}".format(det_result.size()))
-        # print("sph_kw_emb size: {}".format(sph_kw_emb.size()))
         sph_emb = sph_kw_emb[:,kw_emb.size(1):,:]
-
         phn_asr_hyp = self.phn_asr_crit.get_hyp(sph_emb)
 
 

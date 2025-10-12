@@ -72,7 +72,7 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
         num_au_kw_concat_block=4,
         sok=1,
         eok=1,
-        loss_weight=[0.3,0.7],
+        loss_weight={'ctc_loss': 0.3, 'det_loss': 0.7},
         **kwargs,
     ):
         super(TransformerKWSPhone_nocross_w_ctc, self).__init__()
@@ -103,7 +103,8 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
         au_kw_feed_forward_config = au_kw_transformer_config['feed_forward_config']
         au_kw_hidden_dim = au_kw_transformer_config['size']
 
-        self.l1, self.l2 = loss_weight
+        self.ctc_weight = loss_weight['ctc_loss']
+        self.det_weight = loss_weight['det_loss']
 
         # audio net
         self.au_conv = nn.Sequential(
@@ -165,9 +166,9 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
 
         # detection net
         self.det_net = nn.Sequential(
-            NM.FNNBlock(**au_feed_forward_config), nn.Linear(au_hidden_dim, 1)
+            NM.FNNBlock(**kw_feed_forward_config), nn.Linear(kw_hidden_dim, 1)
         )
-        self.det_crit = nn.BCEWithLogitsLoss(reduction='mean')
+        self.det_crit = nn.BCEWithLogitsLoss(reduction='none')
 
 
     def forward_transformer(
@@ -273,7 +274,7 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
 
     def forward(self, input_data):
 
-        sph_input, sph_len, phn_label, phn_len, kw_label, kw_len, kw_spec_mask, target, target_len = input_data
+        sph_input, sph_len, phn_label, phn_len, kw_label, kw_len, target = input_data
         if torch.any(sph_len < 3):
             print(f"Rank {dist.get_rank()}: Skipping batch with invalid sph_len={sph_len}")
             return None, None
@@ -282,17 +283,13 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
         sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
         sph_mask = ~NM.make_mask(sph_len).unsqueeze(1)
         kw_mask = ~NM.make_mask(kw_len).unsqueeze(1)
-        # print("kw_len: {}, kw_label: {}, kw_spec_mask: {}, target: {}".format(kw_len, kw_label, kw_spec_mask, target))
-        kw_loss_mask = ((~NM.make_mask(kw_len)) & (kw_spec_mask > 0))
-        # print("kw_loss_mask: {}".format(kw_loss_mask))
-        kw_loss_mask_flat = kw_loss_mask.reshape(-1)
-        target_select = torch.cat([target[i][:j] for i, j in enumerate(target_len)], dim=0).to(torch.float32)
 
-        # embedding
+        # speech embedding
         sph_emb = self.au_conv(sph_input.unsqueeze(1))
         b, c, t, d = sph_emb.size()
         sph_emb = self.au_conv_trans(sph_emb.transpose(1,2).contiguous().view(b, t, c * d))
         sph_emb = self.au_trans(sph_emb)
+        # keyword embedding
         kw_emb = self.phn_emb(kw_label.to(torch.long))
         kw_emb = self.kw_trans(kw_emb)
 
@@ -303,45 +300,37 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
         kw_emb = self.forward_transformer(
             self.kw_transformer,
             kw_emb,
-            mask=kw_mask,
+            mask=kw_mask
         )
+
         sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
         sph_kw_emb = torch.cat([kw_emb, sph_emb], dim=1)
         sph_kw_mask = torch.cat([kw_mask, sph_mask], dim=-1)
-        #sph_kw_emb = self.au_kw_pos_emb(sph_kw_emb)
-        det_loss = 0
-        detail_loss = {}
-        for i, tf_layer in enumerate(self.au_kw_transformer):
-            sph_kw_emb, _ = tf_layer(sph_kw_emb, sph_kw_mask, cross_input=None)
+        sph_kw_emb = self.forward_transformer(
+            self.au_kw_transformer,
+            sph_kw_emb,
+            mask=sph_kw_mask
+        )
 
-            # detection loss
-
-            det_logit_layer = self.det_net(sph_kw_emb[:,0:kw_emb.size(1),:])
-            det_logit_layer_flat = det_logit_layer[:,:,0].reshape(-1)
-            # print("det_logit_layer: {}".format(det_logit_layer))
-            # print("kw_loss_mask_flat: {}".format(kw_loss_mask_flat))
-            det_logit_layer_select = det_logit_layer_flat[kw_loss_mask_flat]
-
-            # print("det_logit_layer_select size: {}".format(det_logit_layer_select.size()))
-            # print("target_select size: {}".format(target_select.size()))
-            # print("det_logit_layer_select: {}".format(det_logit_layer_select))
-            # print("target_select: {}".format(target_select))
-            det_loss_layer = self.det_crit(det_logit_layer_select, target_select)
-            # kw_loss_mask = ((~kw_mask.squeeze(1)) & (kw_spec_mask > 0)).to(torch.float32)
-            # det_loss_layer = (det_loss_layer * kw_loss_mask).sum() / kw_spec_mask.sum()
-            det_loss += det_loss_layer / len(self.au_kw_transformer)
-            detail_loss['det_loss_layer_{}'.format(i)] = det_loss_layer.clone().detach()
-        
-        sph_emb = sph_kw_emb[:,kw_emb.size(1):,:]
+        # detection loss
+        det_logit = self.det_net(sph_kw_emb[:,0:kw_emb.size(1),:])
+        det_logit = det_logit[:,:,0]
+        # 使用mask排除padding位置
+        det_loss_mask = kw_mask.squeeze(1)
+        det_loss = self.det_crit(det_logit, target.to(torch.float32))
+        det_loss = (det_loss * det_loss_mask).sum() / det_loss_mask.sum()
 
         # asr loss
+        sph_emb = sph_kw_emb[:,kw_emb.size(1):,:]
         phn_ctc_loss, phn_asr_hyp = self.phn_asr_crit(
             sph_emb, phn_label, sph_len, phn_len, return_hyp=True
         )
 
-        # decoder output 
-        total_loss = (0.3 * phn_ctc_loss) + (0.7 * det_loss)
+        # total loss
+        total_loss = (self.ctc_weight * phn_ctc_loss) + (self.det_weight * det_loss)
+        detail_loss = {}
         detail_loss['phn_ctc_loss'] = phn_ctc_loss.clone().detach()
+        detail_loss['det_loss'] = det_loss.clone().detach()
 
         return total_loss, detail_loss
     
@@ -370,13 +359,16 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
         kw_emb = self.forward_transformer(
             self.kw_transformer,
             kw_emb,
-            mask=kw_mask,
+            mask=kw_mask
         )
         sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
         sph_kw_emb = torch.cat([kw_emb, sph_emb], dim=1)
         sph_kw_mask = torch.cat([kw_mask, sph_mask], dim=-1)
-        for i, tf_layer in enumerate(self.au_kw_transformer):
-            sph_kw_emb, _ = tf_layer(sph_kw_emb, sph_kw_mask, cross_input=None)
+        sph_kw_emb = self.forward_transformer(
+            self.au_kw_transformer,
+            sph_kw_emb,
+            mask=sph_kw_mask
+        )
 
         det_result = self.det_net(sph_kw_emb[:,0:kw_emb.size(1),:])[:,:,0]
         selected_list = []
@@ -386,10 +378,7 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
         det_result = pad_list(selected_list, 0.0).to(sph_kw_emb.device)
         det_result = torch.sigmoid(det_result)
         
-        # print("det_result size: {}".format(det_result.size()))
-        # print("sph_kw_emb size: {}".format(sph_kw_emb.size()))
         sph_emb = sph_kw_emb[:,kw_emb.size(1):,:]
-
         phn_asr_hyp = self.phn_asr_crit.get_hyp(sph_emb)
 
 

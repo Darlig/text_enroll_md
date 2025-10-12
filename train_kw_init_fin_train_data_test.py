@@ -696,8 +696,8 @@ class Trainer():
                 #if b != self.batch_size:
                 #    continue
                 train_data = (d.to(self.device) for d in data)
-                speech,speech_len,phn_label,phn_label_len,keyword,keyword_len,kw_spec_mask,target,target_len = train_data
-                train_data = (speech,speech_len,keyword,keyword_len,kw_spec_mask)
+                speech,speech_len,phn_label,phn_label_len,keyword,keyword_len,target = train_data
+                train_data = (speech,speech_len,keyword,keyword_len)
                 # 改为调用evaluate方法进行推理，使用torch.no_grad()确保不计算梯度
                 with torch.no_grad():
                     det_result, hyp_result = self.model.evaluate(train_data)

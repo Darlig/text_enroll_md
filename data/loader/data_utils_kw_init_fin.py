@@ -1107,46 +1107,6 @@ def detach_corruption(material: Dict) -> Tuple[List, List, List, List, List, Lis
     return keywords, labels, phn_labels, bpe_labels, kw_candidates, b_kw_candidates
     #return keywords, labels, phn_labels, segment_labels, bpe_labels, kw_candidates, b_kw_candidates
 
-# insert special token in label sequence such as SOS: 0(start of sentence) 
-# 1 2 3 4 5 -> "0" 1 2 3 4 5
-def inject_special_token(
-        keyword: List[int], keyword_length: int, label: List=None, 
-        positive: bool=True, keyword_pos: int=None, special_token: Dict={}, bpe_label: List=None, 
-        bpe_candidate: List=None
-    )->Tuple[List, List, List, int]:
-    TEXT_SPEC_TOKEN.update(special_token)
-    new_phn_label = copy.deepcopy(label)
-    new_bpe_label = copy.deepcopy(bpe_label) if bpe_label else [0]
-    new_keyword = copy.deepcopy(keyword)
-    if (not positive) and (TEXT_SPEC_TOKEN['punk'] != None):
-        new_phn_label = torch.tensor([TEXT_SPEC_TOKEN['punk'] for x in range(len(new_phn_label)//3)])
-        if bpe_label:
-            new_bpe_label = torch.tensor([TEXT_SPEC_TOKEN['unk']  for x in range(len(new_bpe_label)//3)])
-
-    if TEXT_SPEC_TOKEN['sos'] != None: # start of sentence
-        new_phn_label = [TEXT_SPEC_TOKEN['sos']] + new_phn_label
-        keyword_pos = keyword_pos + 1  if keyword_pos != None else keyword_pos # one token insert before the keyword
-        
-    if TEXT_SPEC_TOKEN['eos'] != None: # end of sentence
-        new_phn_label = new_phn_label + [TEXT_SPEC_TOKEN['eos']] 
-
-    if TEXT_SPEC_TOKEN['psok'] != None: # start of keyword
-        new_keyword.insert(0, [TEXT_SPEC_TOKEN['psok']])
-
-    if TEXT_SPEC_TOKEN['peok'] != None: # end of keyword
-        new_keyword.insert(len(new_keyword), [TEXT_SPEC_TOKEN['peok']])
-
-    if (TEXT_SPEC_TOKEN['with_trans']) and (positive): # modify keyword in label
-        new_phn_label[keyword_pos: keyword_pos+keyword_length] = new_keyword
-        if bpe_label:
-            bpe_kw_head = bpe_candidate[keyword_pos]
-            bpe_kw_tail = bpe_candidate[keyword_pos + keyword_length - 1] # max index = offset + length - 1
-            bpe_kw = bpe_label[bpe_kw_head: bpe_kw_tail + 1] # keyword in bpe label
-            bpe_kw.insert(0, [TEXT_SPEC_TOKEN['sok']])
-            bpe_kw.insert(len(bpe_kw), [TEXT_SPEC_TOKEN['eok']])
-            new_bpe_label[bpe_kw_head: bpe_kw_tail + 1] = bpe_kw
-
-    return (new_keyword, new_phn_label, new_bpe_label, keyword_pos)
 
 # insert special token in label sequence such as SOS: 0(start of sentence) 
 # 1 2 3 4 5 -> "0" 1 2 3 4 5
@@ -1258,69 +1218,6 @@ def make_keyword_md(
 
     return (keyword, keyword_pos, len(keyword), pos, target)
 
-
-def make_keyword(
-        candidate_seq: List[Any], segment_seq: List[Any],
-        positive_prob: float, num_pre_sample: Optional[int]=None, kw_position_candidate: List=None,
-        corrupt_label: List=None, min_keyword_len: int=2, max_keyword_len: int=6, aux_lexicon: Dict=None
-    ) -> Tuple[List, int, int, bool, int]:
-
-    keyword, keyword_pos = sample_kw_from_label(candidate_seq, segment_seq, kw_position_candidate, min_keyword_len, max_keyword_len)
-    pos = True
-    target = torch.tensor([1])
-
-    dice = random.uniform(0,1)
-    if dice > positive_prob: # negtivae sample
-        # when dice > positive prob means we need sample a negative keyword sample 
-        # this keyword sample should not appeared in current speech and all the corruption speech
-        positive_keyword = keyword[:]
-        positive_label = candidate_seq + corrupt_label if corrupt_label else candidate_seq
-        full_neg_keyword = random_one_neg_from_lexicon(aux_lexicon, min_keyword_len, max_keyword_len, num_pre_sample, positive_label)
-        if len(positive_keyword) >= 2:
-            neg_func_idx = random.randint(0,4)
-        else:
-            neg_func_idx = 4
-        keyword = NEG_FAMILY[neg_func_idx](positive_keyword, aux_lexicon, full_neg_keyword)
-        # check if neg keyword in pos labels
-        flatten_neg = int2sym(unfold_list(keyword))
-        flatten_pos = int2sym(unfold_list(positive_label))
-        if (" {} ".format(" ".join(flatten_neg)) in " {} ".format(" ".join(flatten_pos))):
-            print("make_keyword() -> neg keyword in pos labels, neg_keyword: {}, pos_labels: {}".format(keyword, positive_label))
-            keyword = full_neg_keyword
-        keyword_pos = -1
-        pos = False
-        target = torch.tensor([0])
-    return (keyword, keyword_pos, len(keyword), pos, target)
-
-        
-# sample keyword from asr label, actually sample positive and make a negative
-def make_keyword_dump(sample, positive_prob, neg_len=None):
-    dice = random.uniform(0, 1)
-    label = copy.deepcopy(sample['phn_label'])
-    if dice > positive_prob: # negative sample
-        if 'c_phn_label' in sample:
-            crpt_label = sample['c_phn_label']
-            mlabel = label + crpt_label
-        else:
-            mlabel = label
-        kw = random_one_neg(sample['neg_candidate'], neg_len, mlabel, sample['key'].split('-')[0])
-        kw_pos = -1
-        pos = False
-        target = torch.tensor([0])
-    else: # positvie sample
-        kw_candidate = sample.get('kw_candidate', None)
-        kw, kw_pos = sample_kw_from_label(label, kw_candidate)
-        pos = True
-        target = torch.tensor([1])
-    return kw, kw_pos, len(kw), pos, target
-
-#def set_length_range(segment: List, min_keyword_len: int, max_keyword_len: int)->List:
-#    new_segment = []
-#    for seg in segment:
-#        if len(seg) >= min_keyword_len and len(seg) <= max_keyword_len:
-#            new_segment.append(seg)
-#
-#    return new_segment
 
 # sample negative keyword from the whole corpus
 def random_one_neg(neg_list: List[int], neg_len: int, pos_label: List, spk_id: str=None)->List[int]:

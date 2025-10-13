@@ -263,23 +263,6 @@ def Dataset(conf: Dict,  d_list: List) -> Tuple[Any, ...]:
     else:
         pass
     
-    sot_label_config = conf.get('sot_config', None)
-    if sot_label_config:
-        dataset = Processer(dataset, factory.process_sot_label, **sot_label_config)
-
-    permuate_label_config = conf.get('permuate_label_config', None)
-    if permuate_label_config:
-        dataset = Processer(dataset, factory.process_permuate_label, **permuate_label_config)
-
-    conditional_chain_config = conf.get('conditional_chain', None)
-    if conditional_chain_config:
-        dataset = Processer(dataset, factory.process_conditional_chain_label, **conditional_chain_config)
-
-    permuate_with_keyword_config = conf.get('permuate_with_keyword', None)
-    if permuate_with_keyword_config:
-        permuate_with_keyword_config.update({'neg_len': 20})
-        dataset = Processer(dataset, factory.process_permuate_label_with_keyword, **permuate_with_keyword_config)
-
     # process list data 
     dataset = Processer(dataset, factory.process_list_data)
 

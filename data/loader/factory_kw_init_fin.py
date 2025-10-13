@@ -260,6 +260,9 @@ def process_speech_feats(data: Iterator[Dict], config: Dict[Any, Any]) -> Iterat
 def process_speech_embedding(data: Iterator[Dict], config: Dict[Any, Any]) -> Iterator[Dict]:
     for sample in data:
         sph_embed = np.load(sample['sph_emb'])
+        sph_embed_len = sample['duration'] * 50
+        sph_embed_len = int(sph_embed_len)
+        sph_embed = sph_embed[:sph_embed_len, :]
         sph_embed = torch.from_numpy(sph_embed)
         sample.update({"sph_embed": sph_embed})
         yield sample

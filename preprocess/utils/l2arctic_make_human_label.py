@@ -272,16 +272,20 @@ import sys
     # 68         ]
     # 69     },
 
-def make_human_label_json(source_annot_dir: str, target_json_path: str):
+def make_human_label_json(source_annot_dir: str, target_json_path: str, phone_list: List[str]):
     # pass
     target_label_dict = {}
     n_invalid_utt = 0
     n_utt = 0
+    unk_phn_list = []
     for root, dirs, files in os.walk(source_annot_dir):
         # print(f"Processing {root}")
         if root.split('/')[-1] != 'annotation':
             continue
         subset = root.split('/')[-2]
+        if subset not in ['NJS', 'TLV', 'TNI', 'TXHC', 'YKWK', 'ZHAA']:
+            continue
+        print(f"Processing {subset}")
         for file in files:
             if file.endswith('.TextGrid'):
                 n_utt += 1
@@ -289,45 +293,65 @@ def make_human_label_json(source_annot_dir: str, target_json_path: str):
                 utt_id = re.sub('arctic_', '', utt_id)
                 utt_id = f"{subset}_{utt_id}"
                 utt_annot_path = os.path.join(root, file)
-                utt_label = utt_annot_to_label(utt_annot_path)
-                if utt_label is None:
+                annot_dict = utt_annot_to_label(utt_annot_path, phone_list)
+                if annot_dict is None:
                     n_invalid_utt += 1
                     continue
+                utt_label = annot_dict['label']
+                unk_phns = annot_dict['unk_phns']
+                for unk_phn in unk_phns:
+                    if unk_phn not in unk_phn_list:
+                        unk_phn_list.append(unk_phn)
                 target_label_dict[utt_id] = utt_label
     print(f"num of invalid utts: {n_invalid_utt}/{n_utt}")
+    print(f"num of unk phones: {len(unk_phn_list)}")
+    print(f"first 10 unk phones: {unk_phn_list[:10]}")
     with open(target_json_path, 'w', encoding='utf-8') as f:
         json.dump(target_label_dict, f, ensure_ascii=False, indent=4)
 
 
-def utt_annot_to_label(utt_annot_path: str) -> Dict[str, any]:
+def utt_annot_to_label(utt_annot_path: str, phone_list: List[str]) -> Dict[str, any]:
     annot_phn_list = get_phone_sequence(utt_annot_path)
     annot_word_list = get_word_sequence(utt_annot_path)
     annot_word_seq = ' '.join(annot_word_list)
     phones = []
     phones_accuracy = []
+    unk_phns = []
     for phn in annot_phn_list:
         if ',' in phn:
             connonical_phn, actual_phn, error_type = re.sub(r'\s+', '', phn).split(',')
-            if error_type != 's':
+            if error_type not in ['s', 'd']:
                 # print(f"Error type {error_type} not supported, only support s")
                 return None
 
-            connonical_phn = re.sub(r'[0-9]', '', connonical_phn.lower())
+            connonical_phn = re.sub(r'[0-9`)]', '', connonical_phn).upper()
+            if connonical_phn not in phone_list:
+                return None
+                if connonical_phn not in unk_phns:
+                    unk_phns.append(connonical_phn)
             phones.append(connonical_phn)
             phones_accuracy.append(0)
         else:
-            phn = re.sub(r'[0-9]', '', phn.lower())
+            phn = re.sub(r'[0-9`)]', '', phn).strip().upper()
+            if phn not in phone_list:
+                return None
+                if phn not in unk_phns:
+                    unk_phns.append(phn)
             phones.append(phn)
             phones_accuracy.append(1)
+
     return {
-        'text': annot_word_seq,
-        'words': [
-            {
-                'text': annot_word_seq,
-                'phones': phones,
-                'phones-accuracy': phones_accuracy
-            }
-        ]
+        'label': {
+            'text': annot_word_seq,
+            'words': [
+                {
+                    'text': annot_word_seq,
+                    'phones': phones,
+                    'phones-accuracy': phones_accuracy
+                }
+            ]
+        },
+        'unk_phns': list(unk_phns)
     }
 
 
@@ -487,12 +511,17 @@ def get_word_sequence(file_path: str) -> List[str]:
     return [interval['text'] for interval in word_intervals]
 
 
+def load_phone_list(phone_list_path: str) -> List[str]:
+    with open(phone_list_path, 'r', encoding='utf-8') as f:
+        return [line.strip() for line in f]
+
 # 示例用法
 if __name__ == "__main__":
     # 假设有一个TextGrid文件
     # file_path = "example.TextGrid"
     source_annot_dir = sys.argv[1]
-    target_json_path = sys.argv[2]
+    phone_list_path = sys.argv[2]
+    target_json_path = sys.argv[3]
     
     # 解析整个文件
     # textgrid_data = parse_textgrid_file(file_path)
@@ -509,7 +538,9 @@ if __name__ == "__main__":
     # 获取word序列
     # word_sequence = get_word_sequence(file_path)
     # print("Word序列:", word_sequence)
-    make_human_label_json(source_annot_dir, target_json_path)
+    phone_list = load_phone_list(phone_list_path)
+    print(f"phone_list: {phone_list}")
+    make_human_label_json(source_annot_dir, target_json_path, phone_list)
     
     pass
 

@@ -59,6 +59,9 @@ model_config:
   num_au_kw_concat_block: 4
   sok: 1
   eok: 2
+  loss_weight:
+    ctc_loss: 0.3
+    det_loss: 0.7
 
 # experimental config
 exp_config:
@@ -92,15 +95,16 @@ data_config: &base_data_config
     format: sample
     config:
       positive_prob: 0.5
-      target_level: [phone, word]
-      special_token:
-        unk: 4196
-        sop: 1
-        psok: 2
-        #peok: 2
-        punk: 216
-        with_trans: False
-        #with_trans: True
+      target_level: [phone]
+      #target_level: [phone, word]
+      #special_token:
+      #  unk: 4196
+      #  sop: 1
+      #  psok: 2
+      #  #peok: 2
+      #  punk: 216
+      #  with_trans: False
+      #  #with_trans: True
       sample_func_choice:
         choices:
           - name: sample_kw_from_label
@@ -140,9 +144,11 @@ data_config: &base_data_config
             params:
               max_sub_ratio: 0.5
               min_sub: 1
-
-  length_key: speech,keyword,target
-  fetch_key: speech,speech_len,phn_label,phn_label_len,keyword,keyword_len,kw_spec_mask,target,target_len
+      aux_lexicon: resource/aishell2_kespeech_mandarin/cut_head_100_1channel_100k_aishell/aishell_100k_word_seg/version_kaldi_ipa/data_process/lexicon2_alt_tone.json
+  length_key: speech,keyword
+  #length_key: speech,keyword,target
+  fetch_key: speech,speech_len,phn_label,phn_label_len,keyword,keyword_len,target
+  #fetch_key: speech,speech_len,phn_label,phn_label_len,keyword,keyword_len,kw_spec_mask,target,target_len
   batch_size: 1
   #batch_size: 20
   #batch_size: 100

@@ -36,4 +36,4 @@ spec_augment:
   max_t: 20
   max_f: 10
   spec_prob: 0.8
-aux_lexicon: resource/aishell2_kespeech_mandarin/cut_head_100_1channel_100k_aishell/aishell_100k_word_seg/version_kaldi_ipa/data_process/lexicon2_alt_tone.json
+#aux_lexicon: resource/aishell2_kespeech_mandarin/cut_head_100_1channel_100k_aishell/aishell_100k_word_seg/version_kaldi_ipa/data_process/lexicon2_alt_tone.json

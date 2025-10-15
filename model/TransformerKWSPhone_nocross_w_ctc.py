@@ -126,6 +126,9 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
         # au kw concat net
         self.au_kw_pos_emb = NM.PositionalEncoding(au_kw_hidden_dim)
 
+        # segment embedding for distinguishing speech and keyword segments
+        self.segment_embedding = nn.Embedding(2, au_kw_hidden_dim)  # 0 for speech, 1 for keyword
+
         self.au_kw_transformer = nn.ModuleList([
             NM.TransformerLayer(
                 size=au_kw_hidden_dim,
@@ -208,34 +211,50 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
         sph_emb = self.au_pos_emb(sph_emb)
         kw_emb = self.kw_pos_emb(kw_emb)
 
+        sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
+
         kw_emb = self.forward_transformer(
             self.kw_transformer,
             kw_emb,
             mask=kw_mask
         )
 
-        sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
-        sph_kw_emb = torch.cat([kw_emb, sph_emb], dim=1)
-        sph_kw_mask = torch.cat([kw_mask, sph_mask], dim=-1)
+        # Add segment embeddings
+        batch_size, sph_seq_len, hidden_dim = sph_emb.shape
+        _, kw_seq_len, _ = kw_emb.shape
+        
+        # Create segment IDs: 0 for speech, 1 for keyword
+        sph_segment_ids = torch.zeros(batch_size, sph_seq_len, dtype=torch.long, device=sph_emb.device)
+        kw_segment_ids = torch.ones(batch_size, kw_seq_len, dtype=torch.long, device=kw_emb.device)
+        
+        # Get segment embeddings
+        sph_segment_emb = self.segment_embedding(sph_segment_ids)
+        kw_segment_emb = self.segment_embedding(kw_segment_ids)
+        # Add segment embeddings to the original embeddings
+        sph_emb = sph_emb + sph_segment_emb
+        kw_emb = kw_emb + kw_segment_emb
+
+        sph_kw_emb = torch.cat([sph_emb, kw_emb], dim=1)
+        sph_kw_mask = torch.cat([sph_mask, kw_mask], dim=-1)
         sph_kw_emb = self.forward_transformer(
             self.au_kw_transformer,
             sph_kw_emb,
             mask=sph_kw_mask
         )
 
+        # asr loss
+        sph_emb = sph_kw_emb[:,0:sph_emb.size(1),:]
+        phn_ctc_loss, phn_asr_hyp = self.phn_asr_crit(
+            sph_emb, phn_label, sph_len, phn_len, return_hyp=True
+        )
+
         # detection loss
-        det_logit = self.det_net(sph_kw_emb[:,0:kw_emb.size(1),:])
+        det_logit = self.det_net(sph_kw_emb[:,sph_emb.size(1):,:])
         det_logit = det_logit[:,:,0]
         # 使用mask排除padding位置
         det_loss_mask = kw_mask.squeeze(1)
         det_loss = self.det_crit(det_logit, target.to(torch.float32))
         det_loss = (det_loss * det_loss_mask).sum() / det_loss_mask.sum()
-
-        # asr loss
-        sph_emb = sph_kw_emb[:,kw_emb.size(1):,:]
-        phn_ctc_loss, phn_asr_hyp = self.phn_asr_crit(
-            sph_emb, phn_label, sph_len, phn_len, return_hyp=True
-        )
 
         # total loss
         total_loss = (self.ctc_weight * phn_ctc_loss) + (self.det_weight * det_loss)
@@ -267,26 +286,42 @@ class TransformerKWSPhone_nocross_w_ctc(nn.Module):
         sph_emb = self.au_pos_emb(sph_emb)
         kw_emb = self.kw_pos_emb(kw_emb)
 
+        sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
         kw_emb = self.forward_transformer(
             self.kw_transformer,
             kw_emb,
             mask=kw_mask
         )
-        sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
-        sph_kw_emb = torch.cat([kw_emb, sph_emb], dim=1)
-        sph_kw_mask = torch.cat([kw_mask, sph_mask], dim=-1)
+        
+        # Add segment embeddings
+        batch_size, sph_seq_len, hidden_dim = sph_emb.shape
+        _, kw_seq_len, _ = kw_emb.shape
+        
+        # Create segment IDs: 0 for keyword, 1 for speech
+        sph_segment_ids = torch.zeros(batch_size, sph_seq_len, dtype=torch.long, device=sph_emb.device)
+        kw_segment_ids = torch.ones(batch_size, kw_seq_len, dtype=torch.long, device=kw_emb.device)
+        
+        # Get segment embeddings
+        sph_segment_emb = self.segment_embedding(sph_segment_ids)
+        kw_segment_emb = self.segment_embedding(kw_segment_ids)
+        
+        # Add segment embeddings to the original embeddings
+        sph_emb = sph_emb + sph_segment_emb
+        kw_emb = kw_emb + kw_segment_emb
+
+        sph_kw_emb = torch.cat([sph_emb, kw_emb], dim=1)
+        sph_kw_mask = torch.cat([sph_mask, kw_mask], dim=-1)
         sph_kw_emb = self.forward_transformer(
             self.au_kw_transformer,
             sph_kw_emb,
             mask=sph_kw_mask
         )
 
-        det_result = self.det_net(sph_kw_emb[:,0:kw_emb.size(1),:])[:,:,0]
-        det_result = torch.sigmoid(det_result)
-        
-        sph_emb = sph_kw_emb[:,kw_emb.size(1):,:]
+        sph_emb = sph_kw_emb[:,0:sph_emb.size(1),:]
         phn_asr_hyp = self.phn_asr_crit.get_hyp(sph_emb)
 
+        det_result = self.det_net(sph_kw_emb[:,sph_emb.size(1):,:])[:,:,0]
+        det_result = torch.sigmoid(det_result)
 
         # decoder output 
         return det_result, phn_asr_hyp

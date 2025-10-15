@@ -104,7 +104,7 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         self.au_kw_pos_emb = NM.PositionalEncoding(au_kw_hidden_dim)
         
         # segment embedding for distinguishing speech and keyword segments
-        self.segment_embedding = nn.Embedding(2, au_kw_hidden_dim)  # 0 for keyword, 1 for speech
+        self.segment_embedding = nn.Embedding(2, au_kw_hidden_dim)  # 0 for speech, 1 for keyword
 
         self.au_kw_transformer = nn.ModuleList([
             NM.TransformerLayer(

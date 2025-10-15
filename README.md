@@ -16,6 +16,12 @@ conda activate /work104/weiyang/environment/anaconda3/envs/text_enroll_md
 bash run_train_keyword_init_final.sh --config /work104/weiyang/project/maolidan_thesis/experiment/text_enroll_md/config/train_config/TransformerKWS_nocross/timit_embed_unk42_pos0.1_change0.2_nospec_transformer_4kw_4concat_ctc0.1_det0.9.yaml --GPU 0,1,2,3,4 --port 22130
 ```
 
+### 20251015 TIMIT训练(@dragon03，修正数据unk id, 移除special token，简化detection loss, 移除whisper embedding padding)
+```bash
+conda activate /work104/weiyang/environment/anaconda3/envs/text_enroll_md
+bash run_train_keyword_init_final.sh --config /work104/weiyang/project/maolidan_thesis/experiment/text_enroll_md/config/train_config/TransformerKWS_nocross/timit_embed_trans_pos0.1_change0.2_nospec_transformer_4kw_4concat_ctc0.1_det0.9.yaml --GPU 0,1,2,3,4 --port 22130
+```
+
 ### 202510 aishell-2训练(@dragon03, 移除special token，简化detection loss)
 ```bash
 conda activate /work104/weiyang/environment/anaconda3/envs/text_enroll_md

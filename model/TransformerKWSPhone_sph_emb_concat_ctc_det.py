@@ -102,6 +102,9 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
 
         # au kw concat net
         self.au_kw_pos_emb = NM.PositionalEncoding(au_kw_hidden_dim)
+        
+        # segment embedding for distinguishing speech and keyword segments
+        self.segment_embedding = nn.Embedding(2, au_kw_hidden_dim)  # 0 for keyword, 1 for speech
 
         self.au_kw_transformer = nn.ModuleList([
             NM.TransformerLayer(
@@ -177,7 +180,7 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
         kw_emb = self.kw_trans(kw_emb)
 
         # add position embedding
-        sph_emb = self.au_pos_emb(sph_emb)
+        # sph_emb = self.au_pos_emb(sph_emb)
         kw_emb = self.kw_pos_emb(kw_emb)
 
         kw_emb = self.forward_transformer(
@@ -185,6 +188,21 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
             kw_emb,
             mask=kw_mask
         )
+
+        # Add segment embeddings
+        batch_size, kw_seq_len, hidden_dim = kw_emb.shape
+        _, sph_seq_len, _ = sph_emb.shape
+        
+        # Create segment IDs: 0 for keyword, 1 for speech
+        kw_segment_ids = torch.zeros(batch_size, kw_seq_len, dtype=torch.long, device=kw_emb.device)
+        sph_segment_ids = torch.ones(batch_size, sph_seq_len, dtype=torch.long, device=sph_emb.device)
+        
+        # Get segment embeddings
+        kw_segment_emb = self.segment_embedding(kw_segment_ids)
+        sph_segment_emb = self.segment_embedding(sph_segment_ids)
+        # Add segment embeddings to the original embeddings
+        kw_emb = kw_emb + kw_segment_emb
+        sph_emb = sph_emb + sph_segment_emb
 
         sph_kw_emb = torch.cat([kw_emb, sph_emb], dim=1)
         sph_kw_mask = torch.cat([kw_mask, sph_mask], dim=-1)
@@ -239,6 +257,23 @@ class TransformerKWSPhone_sph_emb_concat_ctc_det(nn.Module):
             kw_emb,
             mask=kw_mask
         )
+        
+        # Add segment embeddings
+        batch_size, kw_seq_len, hidden_dim = kw_emb.shape
+        _, sph_seq_len, _ = sph_emb.shape
+        
+        # Create segment IDs: 0 for keyword, 1 for speech
+        kw_segment_ids = torch.zeros(batch_size, kw_seq_len, dtype=torch.long, device=kw_emb.device)
+        sph_segment_ids = torch.ones(batch_size, sph_seq_len, dtype=torch.long, device=sph_emb.device)
+        
+        # Get segment embeddings
+        kw_segment_emb = self.segment_embedding(kw_segment_ids)
+        sph_segment_emb = self.segment_embedding(sph_segment_ids)
+        
+        # Add segment embeddings to the original embeddings
+        kw_emb = kw_emb + kw_segment_emb
+        sph_emb = sph_emb + sph_segment_emb
+
         sph_kw_emb = torch.cat([kw_emb, sph_emb], dim=1)
         sph_kw_mask = torch.cat([kw_mask, sph_mask], dim=-1)
         sph_kw_emb = self.forward_transformer(

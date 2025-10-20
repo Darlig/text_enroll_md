@@ -380,6 +380,15 @@ class Trainer():
                 "Num Worker: {}".format(num_worker)
             )
 
+    def freeze_modules(self, model, freeze_modules):
+        for module_name in freeze_modules:
+            module = getattr(model, module_name)
+
+            for param in module.parameters():
+                param.requires_grad = False
+        print(f"Frozen modules: {freeze_modules}")
+        self.recorder.info(f"Frozen modules: {freeze_modules}")
+
     def init_opt_model(self):
         # warm_up setting: compute update steps per epoch
         self.batch_size = self.data_config['batch_size']
@@ -441,6 +450,13 @@ class Trainer():
                 self.tb_writer_train = SummaryWriter(tensorboard_dir, filename_suffix='train')
                 self.tb_writer_cv = SummaryWriter(tensorboard_dir, filename_suffix='cv')
             self.recorder.info("Start training from scratch (or finetune) at epoch 0")
+            if self.exp_config.get('freeze_modules', False):
+                self.freeze_modules(
+                    self.model,
+                    self.exp_config['freeze_modules']
+                )
+
+            self.print_model_modules_grad(self.model)
 
         self.scheduler = WarmUpLR(self.optim, warmup_steps=warm_up_peak_step)
         self.scheduler.set_step(self.global_step)
@@ -498,6 +514,12 @@ class Trainer():
             else:
                 self.recorder.info("{} are trainable".format(name))
         
+    def print_model_modules_grad(self, model):
+        self.recorder.info(f"Model modules grad:")
+        for name, module in model.named_modules():
+            self.recorder.info(f"Name: {name}, params.requires_grad: {[ param.requires_grad for param in module.parameters() ]}")
+
+
     def load_ckpt(self, ckpt):
         ckpt_dict = torch.load(ckpt, map_location='cpu')
         model = ckpt_dict['model']

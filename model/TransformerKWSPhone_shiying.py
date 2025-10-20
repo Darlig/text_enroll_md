@@ -61,7 +61,7 @@ att_dict = {
     'MultiHeadAtt': NM.MultiHeadAtt
 }
 
-class TransformerKWSPhone(nn.Module):
+class TransformerKWSPhone_shiying(nn.Module):
     def __init__(
         self,
         audio_net_config,
@@ -74,7 +74,7 @@ class TransformerKWSPhone(nn.Module):
         loss_weight=[0.3,0.6,0.1],
         **kwargs,
     ):
-        super(TransformerKWSPhone, self).__init__()
+        super(TransformerKWSPhone_shiying, self).__init__()
         self.sok = sok
         self.eok = eok
         self.batch_padding_idx = batch_padding_idx
@@ -133,7 +133,6 @@ class TransformerKWSPhone(nn.Module):
             NM.TransformerLayer(
                 size=au_hidden_dim,
                 self_att=au_self_att(**au_self_att_cofing),
-                cross_att=au_cross_att(**au_cross_att_config),
                 feed_forward=NM.FNNBlock(**au_feed_forward_config),
             ) for _ in range(num_audio_block )
         ])
@@ -230,9 +229,9 @@ class TransformerKWSPhone(nn.Module):
         gau_loss = aux_target1 + aux_target2*gau_loss
         return gau_loss 
     
-    def forward_audio_transformer(self, input, mask=None, cross_embedding=None):
+    def forward_audio_transformer(self, input, mask=None):
         for i, tf_layer in enumerate(self.au_transformer):
-            input, att_score = tf_layer(input, mask, cross_input=cross_embedding)
+            input, att_score = tf_layer(input, mask)
         return input
 
     def forward_md_transformer(self, input, mask=None, cross_embedding=None):
@@ -301,7 +300,7 @@ class TransformerKWSPhone(nn.Module):
             kw_emb,
             mask=kw_mask,
         )
-        sph_emb = self.forward_audio_transformer(sph_emb, mask=sph_mask, cross_embedding=(kw_emb, kw_emb, cross_mask))
+        sph_emb = self.forward_audio_transformer(sph_emb, mask=sph_mask)
         kw_emb = self.forward_md_transformer(kw_emb, mask=kw_mask, cross_embedding=(sph_emb, sph_emb, cross_mask.transpose(-2,-1)))
         # asr loss
         phn_ctc_loss, phn_asr_hyp = self.phn_asr_crit(

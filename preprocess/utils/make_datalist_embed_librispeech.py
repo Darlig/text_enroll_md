@@ -33,7 +33,8 @@ def make_datalist(phnid_seq_dict, embedding_scp, out_datalist):
             # phn_label = [ phone2id[phn] for phn in phn_seq ]
             one_obj = {
                 'key': key,
-                'phn_label': phnid_seq,
+                'phn_label': phnid_seq['phn'],
+                'word_phn_label': phnid_seq['seg'],
                 'sph_emb': embedding_path
             }
             f_datalist.write(f"{json.dumps(one_obj)}\n")
@@ -109,6 +110,7 @@ def main(text_scp, lexicon, phones, embedding_scp, out_phone2id, out_datalist):
     n_invalid_utt = 0
     for key, text in text_dict.items():
         phn_seq = []
+        phn_seg_seq = []
         invalid_utt = False
         for word in text.split():
             word = re.sub('[0-9\.,?!:;"]', '', word)
@@ -120,6 +122,7 @@ def main(text_scp, lexicon, phones, embedding_scp, out_phone2id, out_datalist):
                 #    phn_seq.extend(word_phn)
                 #else:
                 phn_seq.extend(word_phn)
+                phn_seg_seq.append(word_phn)
             else:
                 oov_words.add(word)
                 invalid_utt = True
@@ -127,7 +130,7 @@ def main(text_scp, lexicon, phones, embedding_scp, out_phone2id, out_datalist):
         if invalid_utt:
             n_invalid_utt += 1
             continue
-        phn_seq_dict[key] = phn_seq
+        phn_seq_dict[key] = {'phn': phn_seq, 'seg': phn_seg_seq}
     print(f"num of oov words: {len(oov_words)}")
     print(f"first 10 oov words: {list(oov_words)[:10]}")
     print("skipped {} utts for oov word".format(n_invalid_utt))
@@ -135,15 +138,29 @@ def main(text_scp, lexicon, phones, embedding_scp, out_phone2id, out_datalist):
     phnid_seq_dict = {}
     oov_phones = set()
     for key, phn_seq in phn_seq_dict.items():
+        phnid_seq_dict[key] = {}
         phnid_seq = []
-        for phn in phn_seq:
+        for phn in phn_seq['phn']:
             phn = re.sub(r'[0-9]', '', phn)
             if phn in phones:
                 phnid_seq.append(phone2id[phn])
             else:
                 phnid_seq.append(phone2id[unk])
                 oov_phones.add(phn)
-        phnid_seq_dict[key] = phnid_seq
+        phnid_seq_dict[key]['phn'] = phnid_seq
+        phnid_seg_seq = []
+        for phn_seg in phn_seq['seg']:
+            phnid_seg = []
+            for phn in phn_seg:
+                phn = re.sub(r'[0-9]', '', phn)
+                if phn in phones:
+                    phnid_seg.append(phone2id[phn])
+                else:
+                    phnid_seg.append(phone2id[unk])
+                    oov_phones.add(phn)
+            phnid_seg_seq.append(phnid_seg)
+        phnid_seq_dict[key]['seg'] = phnid_seg_seq
+
     print(f"num of oov phones: {len(oov_phones)}")
     print(f"first 10 oov phones: {list(oov_phones)[:10]}")
 

@@ -3,40 +3,22 @@
 """
 Fast neighbor map for large lexicons (200k+) using pattern indexing.
 
-Now supports per-op switches:
-  --allow-sub (default: True)
-  --allow-ins (default: False)
-  --allow-del (default: False)
+Supports:
+  --allow-sub / --allow-ins / --allow-del
+  --max-distance D   # keep neighbors with Levenshtein distance <= D
+  --cap-per-k        # optional cap per wildcard/deletion order to curb explosion
 
-Output schema:
-{
-  "<word>": {
-    "canonical_pron": ["..."],
-    "neighbors": [
-      {
-        "neighbor": "<neighbor word>",
-        "candidate_pron": ["..."],
-        "distance": 1,
-        "counts": { "sub": 1, "ins": 0, "del": 0 },
-        "ops": ["SUB","M","M","M"]
-      },
-      ...
-    ]
-  },
-  ...
-}
-
-Two construction paths:
-- SUB-only, distance=1 (equal length) via wildcard index -> O(N·L)
-- INS/DEL (ED<=1) via deletion index (SymSpell-like) -> O(N·L)
+When D>=2, mixed operations (e.g., SUB+INS) are allowed as long as their op types
+are enabled by the allow- switches.
 """
 
 from __future__ import annotations
 from collections import defaultdict
 from typing import Dict, List, Tuple, Iterable, Any, Set
-import argparse, json, os, sys, multiprocessing as mp
+import argparse, json, multiprocessing as mp
+from itertools import combinations
 
-GAP = "∅"
+SEP = " "
 
 # ---------------- I/O ----------------
 def load_lexicon(path: str) -> Dict[str, List[str]]:
@@ -44,7 +26,6 @@ def load_lexicon(path: str) -> Dict[str, List[str]]:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         return {k: list(v) for k, v in data.items()}
-    # TSV/space-delimited: word p1 p2 ...
     out = {}
     with open(path, "r", encoding="utf-8") as f:
         for ln in f:
@@ -76,280 +57,211 @@ def make_entry(neighbor_word: str,
         "ops": ops_strings
     }
 
-# ------------- Mode A: SUB-only (equal length, dist==1) -------------
-def wildcard_patterns(phones: List[str], sep: str=" ") -> Iterable[str]:
-    for i in range(len(phones)):
-        yield sep.join(phones[:i] + ["*"] + phones[i+1:])
+# ---------- pattern generators ----------
+def wildcard_patterns_k(phones: List[str], k_max: int, cap_per_k: int|None=None) -> Iterable[str]:
+    """Generate all patterns replacing EXACTLY k positions by '*' for k=1..k_max."""
+    L = len(phones)
+    for k in range(1, min(k_max, L)+1):
+        c = 0
+        for idxs in combinations(range(L), k):
+            s = list(phones)
+            for i in idxs:
+                s[i] = "*"
+            yield SEP.join(s)
+            c += 1
+            if cap_per_k is not None and c >= cap_per_k:
+                break
 
-def build_wildcard_index(bucket_words: List[str],
-                         lex: Dict[str, List[str]],
-                         sep: str=" ") -> Dict[str, List[str]]:
-    idx = defaultdict(list)
-    for w in bucket_words:
+def wildcard_patterns_exact_k(phones: List[str], k: int, cap_per_k: int|None=None) -> Iterable[str]:
+    """Generate patterns with EXACTLY k wildcards. If k==0, yield the original sequence."""
+    L = len(phones)
+    if k == 0:
+        yield SEP.join(phones)
+        return
+    c = 0
+    for idxs in combinations(range(L), k):
+        s = list(phones)
+        for i in idxs:
+            s[i] = "*"
+        yield SEP.join(s)
+        c += 1
+        if cap_per_k is not None and c >= cap_per_k:
+            break
+
+def deletion_keys_k(phones: List[str], k_max: int, cap_per_k: int|None=None) -> Iterable[List[str]]:
+    """Yield sequences (as list[str]) after deleting EXACTLY k positions, for k=1..k_max."""
+    L = len(phones)
+    for k in range(1, min(k_max, L)+1):
+        c = 0
+        for idxs in combinations(range(L), k):
+            keep = [phones[i] for i in range(L) if i not in idxs]
+            yield keep
+            c += 1
+            if cap_per_k is not None and c >= cap_per_k:
+                break
+
+# ---------- Levenshtein (<=D) with traceback ----------
+def align_ops_leqD(p: List[str], q: List[str], D: int) -> Tuple[List[str] | None, int]:
+    """Return (ops, dist) if dist <= D else (None, dist> D)."""
+    lp, lq = len(p), len(q)
+    if abs(lp - lq) > D:
+        return None, D+1
+
+    # banded DP (Ukkonen) distance
+    INF = D + 1
+    prev = [j if j <= D else INF for j in range(lq+1)]
+    for i in range(1, lp+1):
+        cur = [INF]*(lq+1)
+        j_lo = max(1, i-D)
+        j_hi = min(lq, i+D)
+        cur[0] = i if i <= D else INF
+        for j in range(j_lo, j_hi+1):
+            sub  = prev[j-1] + (0 if p[i-1]==q[j-1] else 1)
+            dele = prev[j] + 1
+            ins  = cur[j-1] + 1
+            cur[j] = min(sub, dele, ins)
+        prev = cur
+    dist = prev[lq]
+    if dist > D:
+        return None, dist
+
+    # full DP for traceback
+    dp = [[0]*(lq+1) for _ in range(lp+1)]
+    for i in range(lp+1): dp[i][0] = i
+    for j in range(lq+1): dp[0][j] = j
+    for i in range(1, lp+1):
+        for j in range(1, lq+1):
+            dp[i][j] = min(
+                dp[i-1][j-1] + (0 if p[i-1]==q[j-1] else 1),
+                dp[i-1][j] + 1,
+                dp[i][j-1] + 1
+            )
+    ops: List[str] = []
+    i, j = lp, lq
+    while i>0 or j>0:
+        if i>0 and j>0 and dp[i][j] == dp[i-1][j-1] + (0 if p[i-1]==q[j-1] else 1):
+            ops.append("M" if p[i-1]==q[j-1] else "SUB"); i-=1; j-=1
+        elif i>0 and dp[i][j] == dp[i-1][j] + 1:
+            ops.append("DEL"); i-=1
+        else:
+            ops.append("INS"); j-=1
+    ops.reverse()
+    return ops, dist
+
+# ---------- same-length neighbors via k-wildcards ----------
+def same_length_neighbors(ws: List[str],
+                          lex: Dict[str, List[str]],
+                          Dmax: int,
+                          allow_sub: bool, allow_ins: bool, allow_del: bool,
+                          conf_pairs: Set[Tuple[str,str]]|None,
+                          cap_per_k: int|None,
+                          max_neighbors_per_word: int) -> Dict[str, List[Dict[str, Any]]]:
+    out = {w: [] for w in ws}
+    if not ws or Dmax <= 0:
+        return out
+
+    # wildcard buckets for k=1..Dmax
+    pat2words: Dict[str, List[str]] = defaultdict(list)
+    for w in ws:
         p = lex[w]
-        for pat in wildcard_patterns(p, sep):
-            idx[pat].append(w)
-    return idx
+        for pat in wildcard_patterns_k(p, Dmax, cap_per_k):
+            pat2words[pat].append(w)
 
-def subonly_neighbors_for_bucket(bucket_words: List[str],
-                                 lex: Dict[str, List[str]],
-                                 allow_sub: bool,
-                                 conf_pairs: Set[Tuple[str,str]]|None = None,
-                                 max_neighbors_per_word: int = 50) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Returns {word: [NeighborEntry,...]} for words with same length.
-    Each entry: neighbor, candidate_pron, distance, counts, ops
-    """
-    result: Dict[str, List[Dict[str, Any]]] = {w: [] for w in bucket_words}
-    if not bucket_words or not allow_sub:
-        return result
-
-    L = len(lex[bucket_words[0]])
-    idx = build_wildcard_index(bucket_words, lex)
-
-    for _, words in idx.items():
-        if len(words) < 2:
-            continue
-        for i, w1 in enumerate(words):
-            p1 = lex[w1]
-            for w2 in words[i+1:]:
-                p2 = lex[w2]
-                # differ at exactly one position
-                diff_pos = -1
-                diff_cnt = 0
-                for k in range(L):
-                    if p1[k] != p2[k]:
-                        diff_cnt += 1
-                        diff_pos = k
-                        if diff_cnt > 1: break
-                if diff_cnt != 1:
+    # pair candidates within each bucket
+    seen_pairs = set()
+    for group in pat2words.values():
+        if len(group) < 2: continue
+        G = group
+        for i in range(len(G)):
+            w1 = G[i]; p1 = lex[w1]
+            for j in range(i+1, len(G)):
+                w2 = G[j]; p2 = lex[w2]
+                if (w1,w2) in seen_pairs: continue
+                seen_pairs.add((w1,w2))
+                ops, dist = align_ops_leqD(p1, p2, Dmax)
+                if ops is None or dist > Dmax:
                     continue
-                # whitelist (optional)
-                if conf_pairs is not None:
-                    pair = (p1[diff_pos], p2[diff_pos])
-                    rev  = (p2[diff_pos], p1[diff_pos])
-                    if (pair not in conf_pairs) and (rev not in conf_pairs):
+                # op-type filter (allows mixing)
+                if (not allow_sub and "SUB" in ops) or (not allow_ins and "INS" in ops) or (not allow_del and "DEL" in ops):
+                    continue
+                # optional confusion whitelist for pure single SUB
+                if dist==1 and ops.count("SUB")==1 and ops.count("INS")==0 and ops.count("DEL")==0 and conf_pairs:
+                    kpos = next(k for k,o in enumerate(ops) if o=="SUB")
+                    if (p1[kpos], p2[kpos]) not in conf_pairs and (p2[kpos], p1[kpos]) not in conf_pairs:
                         continue
+                if len(out[w1]) < max_neighbors_per_word:
+                    out[w1].append(make_entry(w2, p2, ops))
+                if len(out[w2]) < max_neighbors_per_word:
+                    out[w2].append(make_entry(w1, p1, ops))
+    for w in out:
+        out[w].sort(key=lambda e: (e["distance"], e["neighbor"]))
+    return out
 
-                ops12 = ["SUB" if k==diff_pos else "M" for k in range(L)]
-                ops21 = ["SUB" if k==diff_pos else "M" for k in range(L)]
-
-                if len(result[w1]) < max_neighbors_per_word:
-                    result[w1].append(make_entry(w2, p2, ops12))
-                if len(result[w2]) < max_neighbors_per_word:
-                    result[w2].append(make_entry(w1, p1, ops21))
-
-    for w in result:
-        result[w].sort(key=lambda e: (e["distance"], e["neighbor"]))
-    return result
-
-# ------------- Mode B: INS/DEL via deletion index (ED<=1) -------------
-def deletion_keys(phones: List[str], sep: str=" ") -> Iterable[str]:
-    for i in range(len(phones)):
-        yield sep.join(phones[:i] + phones[i+1:])
-
-def build_deletion_index(bucket_words: List[str],
-                         lex: Dict[str, List[str]],
-                         sep: str=" ") -> Dict[str, List[str]]:
-    idx = defaultdict(list)
-    for w in bucket_words:
-        for key in deletion_keys(lex[w], sep):
-            idx[key].append(w)
-    return idx
-
-def align_ed1_ops(p: List[str], q: List[str]) -> List[str] | None:
+# ---------- cross-length neighbors with delete+k-wildcards (supports INS+SUB etc.) ----------
+def cross_length_neighbors(bucket_words_by_len: Dict[int, List[str]],
+                           lex: Dict[str, List[str]],
+                           Dmax: int,
+                           allow_sub: bool, allow_ins: bool, allow_del: bool,
+                           cap_per_k: int|None,
+                           max_neighbors_per_word: int) -> Dict[str, List[Dict[str, Any]]]:
     """
-    Edit distance <= 1:
-      - equal length: exactly 1 SUB -> ops = ["M"/"SUB"] length L
-      - len diff +1: exactly 1 INS  -> ops includes one "INS"
-      - len diff -1: exactly 1 DEL  -> ops includes one "DEL"
-    Returns ops list of strings or None if not ED<=1.
-    NOTE: This function returns only the ops sequence (not aligned ref/hyp phones),
-          which is sufficient for counts/distance and schema here.
-    """
-    # equal length: exactly 1 SUB
-    if len(p) == len(q):
-        diff = [i for i,(a,b) in enumerate(zip(p,q)) if a!=b]
-        if len(diff) != 1:
-            return None
-        k = diff[0]
-        return ["SUB" if i==k else "M" for i in range(len(p))]
-
-    # insertion wrt p (q longer by 1)
-    if len(p) + 1 == len(q):
-        ops: List[str] = []
-        i=j=0
-        ins_done = False
-        while i < len(p) and j < len(q):
-            if p[i] == q[j]:
-                ops.append("M")
-                i += 1; j += 1
-            else:
-                if ins_done:
-                    return None
-                ops.append("INS")
-                j += 1
-                ins_done = True
-        # handle tail
-        if j < len(q):
-            # remaining in q must be exactly one and INS not done yet
-            if ins_done or (j != len(q)-1):
-                return None
-            ops.append("INS")
-            j += 1
-            ins_done = True
-        # if p has tail left, invalid for INS case
-        if i < len(p):
-            return None
-        return ops
-
-    # deletion wrt p (q shorter by 1)
-    if len(p) == len(q) + 1:
-        ops: List[str] = []
-        i=j=0
-        del_done = False
-        while i < len(p) and j < len(q):
-            if p[i] == q[j]:
-                ops.append("M")
-                i += 1; j += 1
-            else:
-                if del_done:
-                    return None
-                ops.append("DEL")
-                i += 1
-                del_done = True
-        # handle tail in p
-        if i < len(p):
-            if del_done or (i != len(p)-1):
-                return None
-            ops.append("DEL")
-            i += 1
-            del_done = True
-        # if q has tail left, invalid for DEL case
-        if j < len(q):
-            return None
-        return ops
-
-    return None
-
-def ed1_neighbors_for_bucket(bucket_words_by_len: Dict[int, List[str]],
-                             lex: Dict[str, List[str]],
-                             allow_sub: bool,
-                             allow_ins: bool,
-                             allow_del: bool,
-                             conf_pairs: Set[Tuple[str,str]]|None = None,
-                             max_neighbors_per_word: int = 50) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Build ED<=1 neighbors across length L and L±1 using deletion index.
-    Returns {word: [NeighborEntry,...]} obeying per-op switches.
+    For length difference k in 1..Dmax:
+      - For each longer word, delete exactly k phones to get base seq Qk (many variants).
+      - For r in 0..(Dmax-k), build wildcard patterns with exactly r '*' on Qk and index them.
+      - For each shorter word P of length L, for the same r generate P's r-wildcards, probe the index.
+      - Validate matches by DP (<=Dmax) and op-type filter. This recalls mixed ops like INS+SUB.
     """
     out = {w: [] for _, ws in bucket_words_by_len.items() for w in ws}
+    if Dmax <= 0:
+        return out
 
-    # 1) same-length SUB-only via wildcard (obey allow_sub)
-    for _, ws in bucket_words_by_len.items():
-        sub_map = subonly_neighbors_for_bucket(ws, lex, allow_sub, conf_pairs, max_neighbors_per_word)
-        for w, lst in sub_map.items():
-            out[w].extend(lst)
+    lengths = sorted(bucket_words_by_len.keys())
+    for L in lengths:
+        short_ws = bucket_words_by_len[L]
+        if not short_ws: continue
 
-    # 2) INS/DEL between L and L+1 via deletion index (only index the longer side!)
-    for L in bucket_words_by_len:
-        ws_short = bucket_words_by_len[L]
-        ws_long  = bucket_words_by_len.get(L+1, [])
-        if not ws_short or not ws_long:
-            continue
+        for k in range(1, Dmax+1):
+            long_ws = bucket_words_by_len.get(L+k, [])
+            if not long_ws: continue
 
-        # build deletion index ONLY for the longer words:
-        # key = long_word with one phone removed  ==> maps to that long word
-        long_del_idx: Dict[str, List[str]] = defaultdict(list)
-        for w_long in ws_long:
-            q = lex[w_long]
-            for i in range(len(q)):
-                key = " ".join(q[:i] + q[i+1:])
-                long_del_idx[key].append(w_long)
+            # Build index: pattern -> list of (wlong, base_seq_after_del)
+            pat2longs: Dict[str, List[Tuple[str, List[str]]]] = defaultdict(list)
+            # For each longer word, enumerate all delete-k variants, then add r-wildcards on them (r=0..Dmax-k)
+            for wlong in long_ws:
+                q = lex[wlong]
+                for base_seq in deletion_keys_k(q, k, cap_per_k):
+                    R = Dmax - k
+                    for r in range(0, R+1):
+                        for pat in wildcard_patterns_exact_k(base_seq, r, cap_per_k):
+                            pat2longs[pat].append((wlong, base_seq))
 
-        # now, for each short word, look up its FULL sequence in the long_del_idx
-        for w_short in ws_short:
-            p = lex[w_short]
-            key = " ".join(p)
-            cand_longs = long_del_idx.get(key, [])
-            if not cand_longs:
-                continue
-
-            for w_long in cand_longs:
-                q = lex[w_long]
-                # forward (short -> long): should be INS wrt short
-                ops = align_ed1_ops(p, q)
-                if ops is not None:
-                    has_sub = any(op == "SUB" for op in ops)
-                    has_ins = any(op == "INS" for op in ops)
-                    has_del = any(op == "DEL" for op in ops)
-                    if not ((has_sub and not allow_sub) or (has_ins and not allow_ins) or (has_del and not allow_del)):
-                        if len(out[w_short]) < max_neighbors_per_word:
-                            out[w_short].append(make_entry(w_long, q, ops))
-
-                # reverse (long -> short): should be DEL wrt long
-                ops_rev = align_ed1_ops(q, p)
-                if ops_rev is not None:
-                    has_sub_r = any(op == "SUB" for op in ops_rev)
-                    has_ins_r = any(op == "INS" for op in ops_rev)
-                    has_del_r = any(op == "DEL" for op in ops_rev)
-                    if not ((has_sub_r and not allow_sub) or (has_ins_r and not allow_ins) or (has_del_r and not allow_del)):
-                        if len(out[w_long]) < max_neighbors_per_word:
-                            out[w_long].append(make_entry(w_short, p, ops_rev))
-
-    # # 2) INS/DEL between L and L+1 via deletion index (obey allow_ins/allow_del)
-    # # If both disabled, skip
-    # if not allow_ins and not allow_del:
-    #     # still return what SUB-only added
-    #     for w in out:
-    #         out[w].sort(key=lambda e: (e["distance"], e["neighbor"]))
-    #     return out
-
-    # for L in bucket_words_by_len:
-    #     wsL   = bucket_words_by_len[L]
-    #     wsLp1 = bucket_words_by_len.get(L+1, [])
-    #     if not wsL or not wsLp1:
-    #         continue
-    #     idx_L  = build_deletion_index(wsL,  lex)
-    #     idx_L1 = build_deletion_index(wsLp1, lex)
-
-    #     # words of len L can INS to len L+1 via shared delete-key
-    #     for key, wlist_long in idx_L1.items():
-    #         short_list = idx_L.get(key, [])
-    #         if not short_list:
-    #             continue
-    #         for w_short in short_list:
-    #             p = lex[w_short]
-    #             for w_long in wlist_long:
-    #                 q = lex[w_long]
-    #                 ops = align_ed1_ops(p, q)
-    #                 if ops is None:
-    #                     continue
-    #                 # filter by allowed ops
-    #                 has_sub = any(op == "SUB" for op in ops)
-    #                 has_ins = any(op == "INS" for op in ops)
-    #                 has_del = any(op == "DEL" for op in ops)
-    #                 if (has_sub and not allow_sub) or (has_ins and not allow_ins) or (has_del and not allow_del):
-    #                     continue
-    #                 if len(out[w_short]) < max_neighbors_per_word:
-    #                     out[w_short].append(make_entry(w_long, q, ops))
-
-    #                 # reverse direction
-    #                 ops_rev = align_ed1_ops(q, p)
-    #                 if ops_rev is not None:
-    #                     has_sub_r = any(op == "SUB" for op in ops_rev)
-    #                     has_ins_r = any(op == "INS" for op in ops_rev)
-    #                     has_del_r = any(op == "DEL" for op in ops_rev)
-    #                     if (has_sub_r and not allow_sub) or (has_ins_r and not allow_ins) or (has_del_r and not allow_del):
-    #                         pass
-    #                     elif len(out[w_long]) < max_neighbors_per_word:
-    #                         out[w_long].append(make_entry(w_short, p, ops_rev))
+            # Probe with shorter words: for same r (0..R), generate r-wildcards and look up
+            for wshort in short_ws:
+                p = lex[wshort]
+                R = Dmax - k
+                for r in range(0, R+1):
+                    for pat in wildcard_patterns_exact_k(p, r, cap_per_k):
+                        cand = pat2longs.get(pat, [])
+                        if not cand: continue
+                        for wlong, base_seq in cand:
+                            q = lex[wlong]
+                            # validate both directions (short->long, long->short)
+                            ops, dist = align_ops_leqD(p, q, Dmax)
+                            if ops is not None and dist <= Dmax:
+                                if not ((not allow_sub and "SUB" in ops) or (not allow_ins and "INS" in ops) or (not allow_del and "DEL" in ops)):
+                                    if len(out[wshort]) < max_neighbors_per_word:
+                                        out[wshort].append(make_entry(wlong, q, ops))
+                            opsr, distr = align_ops_leqD(q, p, Dmax)
+                            if opsr is not None and distr <= Dmax:
+                                if not ((not allow_sub and "SUB" in opsr) or (not allow_ins and "INS" in opsr) or (not allow_del and "DEL" in opsr)):
+                                    if len(out[wlong]) < max_neighbors_per_word:
+                                        out[wlong].append(make_entry(wshort, p, opsr))
 
     for w in out:
         out[w].sort(key=lambda e: (e["distance"], e["neighbor"]))
     return out
 
-# ------------- Orchestration & CLI -------------
+# ---------- Orchestration ----------
 def chunk_by_length(lex: Dict[str, List[str]]) -> Dict[int, List[str]]:
     buckets = defaultdict(list)
     for w, p in lex.items():
@@ -360,56 +272,67 @@ def run_fast_neighbors(lex: Dict[str, List[str]],
                        allow_sub: bool,
                        allow_ins: bool,
                        allow_del: bool,
+                       max_distance: int,
                        conf_pairs: Set[Tuple[str,str]]|None,
                        max_neighbors_per_word: int,
+                       cap_per_k: int|None,
                        workers: int = max(1, mp.cpu_count()//2)) -> Dict[str, Dict[str, Any]]:
-    """
-    Return:
-      {
-        word: {
-          "canonical_pron": [...],
-          "neighbors": [NeighborEntry,...]
-        },
-        ...
-      }
-    """
     result: Dict[str, Dict[str, Any]] = {w: {"canonical_pron": lex[w], "neighbors": []} for w in lex}
-
-    # Fast path: if only SUB is allowed, we can parallelize purely by length buckets
-    only_sub = allow_sub and not allow_ins and not allow_del
-
     buckets = chunk_by_length(lex)
-    print(f"allow_sub: {allow_sub}, allow_ins: {allow_ins}, allow_del: {allow_del}")
+    Dmax = max(1, int(max_distance))
 
-    if only_sub:
-        print("Only SUB is allowed")
-        args = [(ws, lex, allow_sub, conf_pairs, max_neighbors_per_word) for _, ws in buckets.items()]
-        with mp.Pool(processes=workers) as pool:
-            parts = pool.starmap(subonly_neighbors_for_bucket, args)
-        for part in parts:
-            for w, entries in part.items():
-                result[w]["neighbors"].extend(entries)
-        return result
+    # same-length (parallel per length)
+    args = []
+    for _, ws in buckets.items():
+        args.append((ws, lex, Dmax, allow_sub, allow_ins, allow_del, conf_pairs, cap_per_k, max_neighbors_per_word))
+    with mp.Pool(processes=workers) as pool:
+        parts = pool.starmap(same_length_neighbors, args)
+    for part in parts:
+        for w, entries in part.items():
+            result[w]["neighbors"].extend(entries)
 
-    print("INS/DEL is allowed")
-    # Otherwise we need ED<=1 path including potential INS/DEL
-    neighbor_map = ed1_neighbors_for_bucket(buckets, lex, allow_sub, allow_ins, allow_del,
-                                            conf_pairs, max_neighbors_per_word)
-    for w, entries in neighbor_map.items():
-        result[w]["neighbors"].extend(entries)
+    # cross-length (only if INS/DEL allowed)
+    if allow_ins or allow_del:
+        cross_map = cross_length_neighbors(buckets, lex, Dmax, allow_sub, allow_ins, allow_del,
+                                           cap_per_k, max_neighbors_per_word)
+        for w, entries in cross_map.items():
+            result[w]["neighbors"].extend(entries)
+
+    for w in result:
+        result[w]["neighbors"].sort(key=lambda e: (e["distance"], e["neighbor"]))
     return result
 
+# ---------- CLI ----------
 def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument("--lexicon", required=True)
     ap.add_argument("--out", required=True)
-    # per-op switches
-    ap.add_argument("--allow-sub", action="store_true", default=False, help="Allow SUB (equal length, dist=1). Default: True.")
-    ap.add_argument("--allow-ins", action="store_true", default=False, help="Allow INS (length +1). Default: False.")
-    ap.add_argument("--allow-del", action="store_true", default=False, help="Allow DEL (length -1). Default: False.")
+
+    # per-op switches (mutually exclusive pairs)
+    group_sub = ap.add_mutually_exclusive_group()
+    group_sub.add_argument("--allow-sub",    dest="allow_sub", action="store_true",  help="Allow SUB.")
+    group_sub.add_argument("--no-allow-sub", dest="allow_sub", action="store_false", help="Disallow SUB.")
+    ap.set_defaults(allow_sub=True)
+
+    group_ins = ap.add_mutually_exclusive_group()
+    group_ins.add_argument("--allow-ins",    dest="allow_ins", action="store_true",  help="Allow INS.")
+    group_ins.add_argument("--no-allow-ins", dest="allow_ins", action="store_false", help="Disallow INS.")
+    ap.set_defaults(allow_ins=False)
+
+    group_del = ap.add_mutually_exclusive_group()
+    group_del.add_argument("--allow-del",    dest="allow_del", action="store_true",  help="Allow DEL.")
+    group_del.add_argument("--no-allow-del", dest="allow_del", action="store_false", help="Disallow DEL.")
+    ap.set_defaults(allow_del=False)
+
+    # maximum distance (keep pairs with dist <= D)
+    ap.add_argument("--max-distance", type=int, default=1,
+                    help="Maximum Levenshtein distance to keep (e.g., 1 or 2). Default: 1")
+
     # extras
-    ap.add_argument("--confusions", default="", help="Optional confusion whitelist file: 'a b' per line for allowed (a,b). Only affects SUB.")
+    ap.add_argument("--confusions", default="", help="Optional whitelist file: 'a b' per line for pure single SUB (dist=1).")
     ap.add_argument("--max-neighbors-per-word", type=int, default=50)
+    ap.add_argument("--cap-per-k", type=int, default=None,
+                    help="Cap patterns per order (wildcards/deletions) to avoid combinatorial explosion. Default: unlimited.")
     ap.add_argument("--workers", type=int, default=max(1, mp.cpu_count()//2))
     return ap.parse_args()
 
@@ -423,6 +346,7 @@ def main():
         with open(args.confusions, "r", encoding="utf-8") as f:
             for ln in f:
                 ln = ln.strip()
+            # confusions only used in same-length pure SUB=1 scenario
                 if not ln or ln.startswith("#"): continue
                 a, b = ln.split()
                 conf_pairs.add((a, b))
@@ -432,15 +356,17 @@ def main():
         allow_sub=args.allow_sub,
         allow_ins=args.allow_ins,
         allow_del=args.allow_del,
+        max_distance=args.max_distance,
         conf_pairs=conf_pairs,
         max_neighbors_per_word=args.max_neighbors_per_word,
+        cap_per_k=args.cap_per_k,
         workers=args.workers
     )
 
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(neighbors, f, ensure_ascii=False, indent=2)
 
-    print(f"[OK] wrote: {args.out}. words={len(lex)}  ops: sub={args.allow_sub}, ins={args.allow_ins}, del={args.allow_del}")
+    print(f"[OK] wrote: {args.out}. words={len(lex)}  ops: sub={args.allow_sub}, ins={args.allow_ins}, del={args.allow_del}  maxD={args.max_distance}")
 
 if __name__ == "__main__":
     main()

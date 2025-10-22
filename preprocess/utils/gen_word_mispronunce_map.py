@@ -179,7 +179,7 @@ def same_length_neighbors(ws: List[str],
                 if (w1,w2) in seen_pairs: continue
                 seen_pairs.add((w1,w2))
                 ops, dist = align_ops_leqD(p1, p2, Dmax)
-                if ops is None or dist > Dmax:
+                if ops is None or not (0 < dist <= Dmax):
                     continue
                 # op-type filter (allows mixing)
                 if (not allow_sub and "SUB" in ops) or (not allow_ins and "INS" in ops) or (not allow_del and "DEL" in ops):
@@ -247,12 +247,12 @@ def cross_length_neighbors(bucket_words_by_len: Dict[int, List[str]],
                             q = lex[wlong]
                             # validate both directions (short->long, long->short)
                             ops, dist = align_ops_leqD(p, q, Dmax)
-                            if ops is not None and dist <= Dmax:
+                            if ops is not None and 0 < dist <= Dmax:
                                 if not ((not allow_sub and "SUB" in ops) or (not allow_ins and "INS" in ops) or (not allow_del and "DEL" in ops)):
                                     if len(out[wshort]) < max_neighbors_per_word:
                                         out[wshort].append(make_entry(wlong, q, ops))
                             opsr, distr = align_ops_leqD(q, p, Dmax)
-                            if opsr is not None and distr <= Dmax:
+                            if opsr is not None and 0 < distr <= Dmax:
                                 if not ((not allow_sub and "SUB" in opsr) or (not allow_ins and "INS" in opsr) or (not allow_del and "DEL" in opsr)):
                                     if len(out[wlong]) < max_neighbors_per_word:
                                         out[wlong].append(make_entry(wshort, p, opsr))

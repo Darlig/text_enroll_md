@@ -215,10 +215,10 @@ def process_speech_feats(data: Iterator[Dict], config: Dict[Any, Any]) -> Iterat
                 raw_wav = copy.deepcopy(speech_feats[i][:, sample_head:sample_head+dur])
                 sample.update({'raw_wav{}'.format(i): raw_wav.squeeze(0)})  
 
-        # Extract feature: MFCC / FBANK 
-        feats_type = config.get('feats_type', 'fbank')
-        feats_config = config.get('feats_config', FBANK_DEFAULT_SETTING)
-        feats = [FEATS_EXTRACTOR[feats_type](f, **feats_config) for f in feats]
+        # # Extract feature: MFCC / FBANK 
+        # feats_type = config.get('feats_type', 'fbank')
+        # feats_config = config.get('feats_config', FBANK_DEFAULT_SETTING)
+        # feats = [FEATS_EXTRACTOR[feats_type](f, **feats_config) for f in feats]
 
         # Spec Augment: time & freq mask
         if config.get('spec_augment', False):

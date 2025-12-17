@@ -18,11 +18,11 @@ import re
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--config',
-        required=True,
-        help="config file in yaml format e.g. config/ref.yaml"
-    )
+    #parser.add_argument(
+    #    '--config',
+    #    required=True,
+    #    help="config file in yaml format e.g. config/ref.yaml"
+    #)
 
     parser.add_argument(
         '--ckpt',
@@ -49,18 +49,18 @@ def get_args():
 class Trainer():
     def __init__(
         self,
-        config_file: dict,
+        #config_file: dict,
     ):
         # init config info
-        self.config_file = config_file
-        self.data_config = config_file['data_config']
-        self.exp_config = config_file['exp_config']
+        #self.config_file = config_file
+        #self.data_config = config_file['data_config']
+        #self.exp_config = config_file['exp_config']
         ckpt_path = args.ckpt
         self.ckpt_dir = os.path.dirname(ckpt_path)
         ckpt_name = os.path.basename(ckpt_path)
         self.ckpt_prefix = re.sub("_\d*.pt$", "", ckpt_name)
-        self.exp_config.update(exp_dir=self.ckpt_dir)
-        self.recorder = Recorder(self.exp_config)
+        #self.exp_config.update(exp_dir=self.ckpt_dir)
+        #self.recorder = Recorder(self.exp_config)
 
 
     def avg_model_custom(self):
@@ -90,7 +90,8 @@ class Trainer():
         for k in avg_model.keys():
             if avg_model[k] is not None:
                 avg_model[k] = torch.true_divide(avg_model[k], avg_epoch)
-        self.recorder.save_state(avg_model, epoch='avg_{}-{}'.format(min_epoch, max_epoch))
+        torch.save({'model': avg_model}, f"{self.ckpt_dir}/{self.ckpt_prefix}_avg_{min_epoch}-{max_epoch}.pt")
+        #self.recorder.save_state(avg_model, epoch='avg_{}-{}'.format(min_epoch, max_epoch))
         
     def run(self):
         # avg model step
@@ -100,6 +101,7 @@ class Trainer():
 if __name__ == '__main__':
     args = get_args()
     YamlIncludeConstructor.add_to_loader_class(loader_class=yaml.FullLoader)
-    config = yaml.load(open(args.config),Loader=yaml.FullLoader)
-    trainer = Trainer(config)
+    #config = yaml.load(open(args.config),Loader=yaml.FullLoader)
+    trainer = Trainer()
+    #trainer = Trainer(config)
     trainer.run()

@@ -3,6 +3,7 @@ import copy
 import torch.nn as nn
 import model.NetModules as NM
 from transformers import HubertModel
+from typing import Optional
 
 
 def pad_list(xs, pad_value):
@@ -57,7 +58,7 @@ class FrozenHubert(nn.Module):
             self.hubert.to(device)
 
     @torch.no_grad()
-    def forward(self, wav_16k: torch.Tensor, wav_lens: torch.Tensor | None = None):
+    def forward(self, wav_16k: torch.Tensor, wav_lens: Optional[torch.Tensor] = None):
         """
         wav_16k: (B, L) 16kHz
         wav_lens: (B,) 每条的有效长度(采样点数)，用于构造 attention mask（可选但建议给）

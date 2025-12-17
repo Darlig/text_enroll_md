@@ -58,15 +58,15 @@ class FrozenHubert(nn.Module):
             self.hubert.to(device)
 
     @torch.no_grad()
-    def forward(self, wav_16k: torch.Tensor, masks: Optional[torch.Tensor]=None):
+    def forward(self, wav_16k: torch.Tensor, mask: Optional[torch.Tensor]=None):
         """
         wav_16k: (B, L) 16kHz
-        masks: (B, L) 0/1, 用于构造 attention mask（可选但建议给）
+        mask: (B, L) 0/1, 用于构造 attention mask（可选但建议给）
         # """
         B, L = wav_16k.shape
         attn_mask = None
-        if masks is not None:
-            attn_mask = masks.long()
+        if mask is not None:
+            attn_mask = mask.long()
         out = self.hubert(input_values=wav_16k, attention_mask=attn_mask)
         feats = out.last_hidden_state  # (B, T, D)
         return feats
@@ -147,27 +147,27 @@ class TransformerKWSPhone_hubert(nn.Module):
         self.hubert = FrozenHubert()
         self.hubert_trans = nn.Linear(768, au_hidden_dim)  # hubert base output dim is 768
 
-        # audio net
-        self.au_conv = nn.Sequential(
-            torch.nn.Conv2d(1, au_hidden_dim, 3, 2),
-            torch.nn.ReLU(),
-            torch.nn.Conv2d(au_hidden_dim, au_hidden_dim, 3, 2),
-            torch.nn.ReLU(),
-        )
-        self.au_conv_trans = nn.Linear(au_hidden_dim * (((40 - 1) // 2 - 1) // 2), au_hidden_dim)
+        # # audio net
+        # self.au_conv = nn.Sequential(
+        #     torch.nn.Conv2d(1, au_hidden_dim, 3, 2),
+        #     torch.nn.ReLU(),
+        #     torch.nn.Conv2d(au_hidden_dim, au_hidden_dim, 3, 2),
+        #     torch.nn.ReLU(),
+        # )
+        # self.au_conv_trans = nn.Linear(au_hidden_dim * (((40 - 1) // 2 - 1) // 2), au_hidden_dim)
 
-        self.au_trans = NM.FNNBlock(
-            **au_input_trans_config
-        )
-        self.au_pos_emb = NM.PositionalEncoding(au_hidden_dim)
+        # self.au_trans = NM.FNNBlock(
+        #     **au_input_trans_config
+        # )
+        # self.au_pos_emb = NM.PositionalEncoding(au_hidden_dim)
 
-        self.au_transformer = nn.ModuleList([
-            NM.TransformerLayer(
-                size=au_hidden_dim,
-                self_att=au_self_att(**au_self_att_cofing),
-                feed_forward=NM.FNNBlock(**au_feed_forward_config),
-            ) for _ in range(num_audio_self_block)
-        ])
+        # self.au_transformer = nn.ModuleList([
+        #     NM.TransformerLayer(
+        #         size=au_hidden_dim,
+        #         self_att=au_self_att(**au_self_att_cofing),
+        #         feed_forward=NM.FNNBlock(**au_feed_forward_config),
+        #     ) for _ in range(num_audio_self_block)
+        # ])
 
         # kw net
         self.phn_emb = NM.WordEmbedding(

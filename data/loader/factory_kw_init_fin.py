@@ -219,6 +219,7 @@ def process_speech_feats(data: Iterator[Dict], config: Dict[Any, Any]) -> Iterat
         # feats_type = config.get('feats_type', 'fbank')
         # feats_config = config.get('feats_config', FBANK_DEFAULT_SETTING)
         # feats = [FEATS_EXTRACTOR[feats_type](f, **feats_config) for f in feats]
+        feats = feats[0]
 
         # Spec Augment: time & freq mask
         if config.get('spec_augment', False):

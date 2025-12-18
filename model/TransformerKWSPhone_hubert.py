@@ -232,9 +232,7 @@ class TransformerKWSPhone_hubert(nn.Module):
         if torch.any(sph_len < 3):
             print(f"Rank {dist.get_rank()}: Skipping batch with invalid sph_len={sph_len}")
             return None, None
-        # b,t,d = sph_input.size()
-        # sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
-        # sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
+
         sph_mask = ~NM.make_mask(sph_len)
         kw_mask = ~NM.make_mask(kw_len).unsqueeze(1)
 
@@ -246,20 +244,12 @@ class TransformerKWSPhone_hubert(nn.Module):
         sph_mask = ~NM.make_mask(sph_len).unsqueeze(1)
         sph_emb = self.hubert_trans(sph_emb)
 
-        # # speech embedding
-        # sph_emb = self.au_conv(sph_input.unsqueeze(1))
-        # b, c, t, d = sph_emb.size()
-        # sph_emb = self.au_conv_trans(sph_emb.transpose(1,2).contiguous().view(b, t, c * d))
-        # sph_emb = self.au_trans(sph_emb)
         # keyword embedding
         kw_emb = self.phn_emb(kw_label.to(torch.long))
         kw_emb = self.kw_trans(kw_emb)
 
         # add position embedding
-        # sph_emb = self.au_pos_emb(sph_emb)
         kw_emb = self.kw_pos_emb(kw_emb)
-
-        # sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
 
         kw_emb = self.forward_transformer(
             self.kw_transformer,
@@ -322,24 +312,28 @@ class TransformerKWSPhone_hubert(nn.Module):
     def evaluate(self, input_data):
         sph_input, sph_len, kw_label, kw_len = input_data
         # b,t,d = sph_input.size()
-        sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
-        sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
-        sph_mask = ~NM.make_mask(sph_len).unsqueeze(1)
+        # sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
+        # sph_len = NM.BaseConv.compute_dim_redecution(sph_len, 3, 2, 0, 1)
+        sph_mask = ~NM.make_mask(sph_len)
         kw_mask = ~NM.make_mask(kw_len).unsqueeze(1)
 
         # embedding
-        sph_emb = self.au_conv(sph_input.unsqueeze(1))
-        b, c, t, d = sph_emb.size()
-        sph_emb = self.au_conv_trans(sph_emb.transpose(1,2).contiguous().view(b, t, c * d))
-        sph_emb = self.au_trans(sph_emb)
+        sph_emb = self.hubert(sph_input, mask=sph_mask)
+        sph_len = self.hubert.hubert._get_feat_extract_output_lengths(sph_len)
+        sph_mask = ~NM.make_mask(sph_len).unsqueeze(1)
+        sph_emb = self.hubert_trans(sph_emb)
+        # sph_emb = self.au_conv(sph_input.unsqueeze(1))
+        # b, c, t, d = sph_emb.size()
+        # sph_emb = self.au_conv_trans(sph_emb.transpose(1,2).contiguous().view(b, t, c * d))
+        # sph_emb = self.au_trans(sph_emb)
         kw_emb = self.phn_emb(kw_label.to(torch.long))
         kw_emb = self.kw_trans(kw_emb)
 
         # add position embedding
-        sph_emb = self.au_pos_emb(sph_emb)
+        # sph_emb = self.au_pos_emb(sph_emb)
         kw_emb = self.kw_pos_emb(kw_emb)
 
-        sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
+        # sph_emb = self.forward_au_transformer(sph_emb, mask=sph_mask)
         kw_emb = self.forward_transformer(
             self.kw_transformer,
             kw_emb,

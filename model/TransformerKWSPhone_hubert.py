@@ -70,33 +70,6 @@ class FrozenHubert(nn.Module):
         out = self.hubert(input_values=wav_16k, attention_mask=attn_mask)
         feats = out.last_hidden_state  # (B, T, D)
         return feats
-        # if self.device is not None:
-        #     wav_16k = wav_16k.to(self.device)
-        #     if wav_lens is not None:
-        #         wav_lens = wav_lens.to(self.device)
-
-        # # HuBERT 的 forward 支持 attention_mask(按采样点)，这里给可选实现
-        # attn_mask = None
-        # if wav_lens is not None:
-        #     B, L = wav_16k.shape
-        #     attn_mask = torch.arange(L, device=wav_16k.device)[None, :] < wav_lens[:, None]
-        #     attn_mask = attn_mask.long()  # transformers 习惯 0/1
-
-        # out = self.hubert(input_values=wav_16k, attention_mask=attn_mask)
-        # feats = out.last_hidden_state  # (B, T, D)
-
-        # # 生成帧级 mask（有些任务需要）
-        # # transformers 的 HuBERT 会在内部下采样，T 与 L 非线性关系；最稳妥方式是直接用 out.extract_features 的 mask很麻烦。
-        # # 简化：如果你做下游 attention，需要 mask，就用 feats 的 T 并按比例近似（通常够用）。
-        # frame_mask = None
-        # if wav_lens is not None:
-        #     # 近似：T ~= L / 320（20ms stride 时），不同权重可能略有差异，但足够当 mask 用
-        #     # 你也可以直接不传 mask，先跑通实验
-        #     T = feats.size(1)
-        #     approx_T = torch.clamp((wav_lens // 320), min=1, max=T)
-        #     frame_mask = torch.arange(T, device=feats.device)[None, :] < approx_T[:, None]
-
-        # return feats, frame_mask
 
 class TransformerKWSPhone_hubert(nn.Module):
     def __init__(
@@ -269,7 +242,7 @@ class TransformerKWSPhone_hubert(nn.Module):
         sph_emb = self.hubert(sph_input, mask=sph_mask)
         org_sph_len = sph_len
         sph_len = self.hubert.hubert._get_feat_extract_output_lengths(sph_len)
-        print(f"Original sph_len: {org_sph_len}, After HuBERT sph_len: {sph_len}")
+        #print(f"Original sph_len: {org_sph_len}, sph_input shape: {sph_input.shape}, After HuBERT sph_len: {sph_len}, sph shape: {sph_emb.shape}")
         sph_mask = ~NM.make_mask(sph_len).unsqueeze(1)
         sph_emb = self.hubert_trans(sph_emb)
 

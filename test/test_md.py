@@ -78,24 +78,27 @@ def result_extract(det_result, target_level):
 
 def inference(model, speech_path, phones_int, is_decode=False, is_gop=False, is_sph_embed=False):
     with torch.no_grad():
-        if not is_sph_embed:
-            # Load wav file
-            wav = torchaudio.load(speech_path)[0]
-            # Compute fbank features
-            fbank = kaldi.fbank(wav, **FBANK_DEFAULT_SETTING)
+        wav = torchaudio.load(speech_path)[0]
+        speech = wav.unsqueeze(0).to('cuda:0')
+        speech_len = torch.tensor([speech.size(1)])
+        # if not is_sph_embed:
+        #     # Load wav file
+        #     wav = torchaudio.load(speech_path)[0]
+        #     # Compute fbank features
+        #     fbank = kaldi.fbank(wav, **FBANK_DEFAULT_SETTING)
 
-            fbank = fbank.unsqueeze(0).to('cuda:0')
-            fbank_len = torch.tensor([fbank.size(1)])
-            # print("fbank shape: {}".format(fbank.shape))
-            speech = fbank
-            speech_len = fbank_len
-        else:
-            sph_embed = np.load(speech_path)
-            sph_embed = torch.from_numpy(sph_embed)
-            sph_embed = sph_embed.unsqueeze(0).to('cuda:0')
-            sph_embed_len = torch.tensor([sph_embed.size(1)])
-            speech = sph_embed
-            speech_len = sph_embed_len
+        #     fbank = fbank.unsqueeze(0).to('cuda:0')
+        #     fbank_len = torch.tensor([fbank.size(1)])
+        #     # print("fbank shape: {}".format(fbank.shape))
+        #     speech = fbank
+        #     speech_len = fbank_len
+        # else:
+        #     sph_embed = np.load(speech_path)
+        #     sph_embed = torch.from_numpy(sph_embed)
+        #     sph_embed = sph_embed.unsqueeze(0).to('cuda:0')
+        #     sph_embed_len = torch.tensor([sph_embed.size(1)])
+        #     speech = sph_embed
+        #     speech_len = sph_embed_len
         phones_int = [int(ph) for ph in phones_int]
         # print("phones_int shape: {}".format(len(phones_int)))
         # print("phones_int: {}".format(phones_int))

@@ -77,39 +77,103 @@ def result_extract(det_result, target_level):
     return det_result
 
 def inference(model, speech_path, phones_int, is_decode=False, is_gop=False, is_sph_embed=False):
-    with torch.no_grad():
-        #wav = torchaudio.load(speech_path)[0]
-        waveform, sr = torchaudio.load(speech_path)
-        wav = waveform[0]
-        speech = wav.unsqueeze(0).to('cuda:0')
-        speech_len = torch.tensor([speech.size(1)])
-        # if not is_sph_embed:
-        #     # Load wav file
-        #     wav = torchaudio.load(speech_path)[0]
-        #     # Compute fbank features
-        #     fbank = kaldi.fbank(wav, **FBANK_DEFAULT_SETTING)
+    """Run model inference.
 
-        #     fbank = fbank.unsqueeze(0).to('cuda:0')
-        #     fbank_len = torch.tensor([fbank.size(1)])
-        #     # print("fbank shape: {}".format(fbank.shape))
-        #     speech = fbank
-        #     speech_len = fbank_len
-        # else:
-        #     sph_embed = np.load(speech_path)
-        #     sph_embed = torch.from_numpy(sph_embed)
-        #     sph_embed = sph_embed.unsqueeze(0).to('cuda:0')
-        #     sph_embed_len = torch.tensor([sph_embed.size(1)])
-        #     speech = sph_embed
-        #     speech_len = sph_embed_len
+    Backward compatible:
+      - single utt: speech_path=str, phones_int=list
+      - batch: speech_path=list[str], phones_int=list[list]
+
+    Returns:
+      - single utt: (det_result_1d, hyp_result_1d, asr_result_or_None, gop_result_or_None)
+      - batch: (det_results_list, hyp_results_list, asr_results_list_or_None, gop_results_list_or_None)
+    """
+
+    def _pad_1d_float(seqs):
+        lens = torch.tensor([s.numel() for s in seqs], dtype=torch.int64)
+        max_len = int(lens.max().item()) if len(seqs) > 0 else 0
+        out = torch.zeros((len(seqs), max_len), dtype=seqs[0].dtype)
+        for i, s in enumerate(seqs):
+            out[i, : s.numel()] = s
+        return out, lens
+
+    with torch.no_grad():
+        # -------- batch mode --------
+        if isinstance(speech_path, (list, tuple)):
+            assert isinstance(phones_int, (list, tuple)), "Batch mode expects phones_int to be a list/tuple"
+            assert len(speech_path) == len(phones_int), "speech_path and phones_int must have same batch size"
+
+            wav_list = []
+            for p in speech_path:
+                waveform, sr = torchaudio.load(p)  # [C, T]
+                # model expects [T] per utt in current code path
+                wav = waveform[0] if waveform.dim() == 2 else waveform
+                wav_list.append(wav)
+
+            speech, speech_len = _pad_1d_float(wav_list)
+            speech = speech.to('cuda:0')
+            speech_len = speech_len.to('cuda:0')
+
+            phones_list = [[int(ph) for ph in phs] for phs in phones_int]
+            phones_org_list = [phs.copy() for phs in phones_list]
+
+            phones_len = torch.tensor([len(phs) for phs in phones_list], dtype=torch.int64, device='cuda:0')
+            phones_tensor = pad_sequence(
+                [torch.tensor(phs, dtype=torch.int64) for phs in phones_list],
+                batch_first=True,
+                padding_value=0,
+            ).to('cuda:0')
+            phones_org_tensor = pad_sequence(
+                [torch.tensor(phs, dtype=torch.int64) for phs in phones_org_list],
+                batch_first=True,
+                padding_value=0,
+            ).to('cuda:0')
+
+            input = (speech, speech_len, phones_tensor, phones_len)
+            input_data = (d.to('cuda:0') for d in input)
+            det_result, hyp_result = model.evaluate(input_data)
+
+            # det_result: [B, Lmax] (assumed)
+            det_result_np = det_result.detach().cpu().numpy()
+            hyp_result_np = hyp_result.detach().cpu().numpy()
+
+            # optional decode / gop
+            if is_decode:
+                asr_result = model.greedy_decode(hyp_result)
+            else:
+                asr_result = None
+
+            if is_gop:
+                gop_result = model.compute_gop(hyp_result, phones_org_tensor)
+            else:
+                gop_result = None
+
+            # trim per-utt by phones_len
+            det_results_list = []
+            hyp_results_list = []
+            asr_results_list = [] if asr_result is not None else None
+            gop_results_list = [] if gop_result is not None else None
+
+            for b in range(det_result_np.shape[0]):
+                L = int(phones_len[b].item())
+                det_results_list.append(det_result_np[b, :L].copy())
+                hyp_results_list.append(hyp_result_np[b].copy())
+                if asr_results_list is not None:
+                    asr_results_list.append(asr_result[b])
+                if gop_results_list is not None:
+                    gop_results_list.append(gop_result[b])
+
+            return det_results_list, hyp_results_list, asr_results_list, gop_results_list
+
+        # -------- single-utt mode (original) --------
+        wav = torchaudio.load(speech_path)[0]
+        speech = wav.unsqueeze(0).to('cuda:0')
+        speech_len = torch.tensor([speech.size(1)], device='cuda:0')
+
         phones_int = [int(ph) for ph in phones_int]
-        # print("phones_int shape: {}".format(len(phones_int)))
-        # print("phones_int: {}".format(phones_int))
         phones_int_org = phones_int.copy()
-        # print("phones_int after insert sop token: {}".format(phones_int))
-        phones_len = torch.tensor([len(phones_int)])
+        phones_len = torch.tensor([len(phones_int)], device='cuda:0')
         phones_int = torch.tensor(phones_int, dtype=torch.int64, device='cuda:0').unsqueeze(0)
         phones_int_org = torch.tensor(phones_int_org, dtype=torch.int64, device='cuda:0').unsqueeze(0)
-        # phones_accuracy = torch.tensor(phones_accuracy, dtype=torch.float32, device='cuda:0').unsqueeze(0)
 
         input = (speech, speech_len, phones_int, phones_len)
         input_data = (d.to('cuda:0') for d in input)
@@ -121,7 +185,6 @@ def inference(model, speech_path, phones_int, is_decode=False, is_gop=False, is_
             asr_result = None
         if is_gop:
             gop_result = model.compute_gop(hyp_result, phones_int_org)
-            # print("gop_result: ", gop_result)
         else:
             gop_result = None
         det_result = det_result[0]
@@ -130,7 +193,7 @@ def inference(model, speech_path, phones_int, is_decode=False, is_gop=False, is_
         return det_result, hyp_result, asr_result, gop_result
 
 
-def test_md(model, speech_scp_path, phone_path, human_label_path, result_label_score_path, is_decode=False, is_gop=False, is_sph_embed=False):
+def test_md(model, speech_scp_path, phone_path, human_label_path, result_label_score_path, is_decode=False, is_gop=False, is_sph_embed=False, batch_size=1):
     if os.path.exists(result_label_score_path):
         print("Result file already exists: {}. Skip md test.".format(result_label_score_path))
         return
@@ -146,25 +209,45 @@ def test_md(model, speech_scp_path, phone_path, human_label_path, result_label_s
         f_refer = open(reference_path, 'w')
     if is_gop:
         f_gop = open(result_gop_path, 'w')
-    for n, (uttid, speech_path, phones_int, phones_accuracy) in enumerate(data_list):
+    for n in range(0, len(data_list), batch_size):
+        batch = data_list[n:n+batch_size]
         if n % 2000 == 0:
-            print("Inferencing {}th utterance: {}".format(n, uttid))
-        try:
-            det_result, hyp_result, asr_result, gop_result = inference(model, speech_path, phones_int, is_decode, is_gop, is_sph_embed)
-        except Exception as e:
-            print(f"Error processing {uttid}: {e}")
-            continue
-        #print("utt: {}, phones: {}, det_result: {}".format(uttid, phones_int, det_result))
-        for i in range(len(det_result)):
-            f_score.write("{}.{}\t{}\t{}\t{}\n".format(uttid, i, phones_accuracy[i], det_result[i], phones_int[i]))
-        if is_decode:
-            asr_result_str = " ".join([ str(p) for p in asr_result ])
-            human_phn_str = " ".join(phones_int)
-            f_decode.write("{} {}\n".format(uttid, asr_result_str))
-            f_refer.write("{} {}\n".format(uttid, human_phn_str))
-        if is_gop:
-            for i in range(len(gop_result)):
-                f_gop.write("{}.{}\t{}\t{}\t{}\n".format(uttid, i, phones_accuracy[i], gop_result[i]["gop"], phones_int[i]))
+            print("Inferencing {}th utterance: {}".format(n, batch[0][0]))
+
+        uttids = [x[0] for x in batch]
+        speech_paths = [x[1] for x in batch]
+        phones_ints = [x[2] for x in batch]
+        phones_accuracys = [x[3] for x in batch]
+
+        #try:
+        det_results, hyp_results, asr_results, gop_results = inference(
+            model, speech_paths, phones_ints, is_decode, is_gop, is_sph_embed
+        )
+        #except Exception as e:
+        #    print(f"Error processing batch starting at {uttids[0]}: {e}")
+        #    continue
+
+        for b in range(len(batch)):
+            uttid = uttids[b]
+            phones_int = phones_ints[b]
+            phones_accuracy = phones_accuracys[b]
+            det_result = det_results[b]
+            gop_result = gop_results[b] if gop_results is not None else None
+            asr_result = asr_results[b] if asr_results is not None else None
+
+            #print("utt: {}, phones: {}, det_result: {}".format(uttid, phones_int, det_result))
+            for i in range(len(det_result)):
+                f_score.write("{}.{}\t{}\t{}\t{}\n".format(uttid, i, phones_accuracy[i], det_result[i], phones_int[i]))
+
+            if is_decode and asr_result is not None:
+                asr_result_str = " ".join([str(p) for p in asr_result])
+                human_phn_str = " ".join(phones_int)
+                f_decode.write("{} {}\n".format(uttid, asr_result_str))
+                f_refer.write("{} {}\n".format(uttid, human_phn_str))
+
+            if is_gop and gop_result is not None:
+                for i in range(len(gop_result)):
+                    f_gop.write("{}.{}\t{}\t{}\t{}\n".format(uttid, i, phones_accuracy[i], gop_result[i]["gop"], phones_int[i]))
     f_score.close()
     if is_decode:
         f_decode.close()
@@ -680,10 +763,7 @@ def result_analysis(result_label_score_path, is_gop=False, target_precision=0, p
             if len(parts) < 4:
                 continue
             phone_index, label, score, phone_id = parts
-            try:
-                all_results.append([phone_index, float(label), float(score), phone_id])
-            except:
-                print(f"fail to convert result line: {phone_index}, {label}, {score}, {phone_id}, ({line}), path: {result_label_score_path}")
+            all_results.append([phone_index, float(label), float(score), phone_id])
         # reverse human label and model score because a mispronounciation is a positive sample
         y_true = [ 1 - int(res[1]) for res in all_results ]
         # print("length of y_true: {}".format(len(y_true)))
@@ -723,6 +803,7 @@ if __name__ == '__main__':
     if not os.path.exists(os.path.dirname(result_label_score_path)):
         os.makedirs(os.path.dirname(result_label_score_path))
 
+    batch_size = int(test_config.get('batch_size', 1))
     test_model = load_model()
     test_model.eval()
     test_md(
@@ -733,7 +814,8 @@ if __name__ == '__main__':
         result_label_score_path,
         is_decode=test_config.get('is_decode', False),
         is_gop=test_config.get('is_gop', False),
-        is_sph_embed=is_sph_embed
+        is_sph_embed=is_sph_embed,
+        batch_size=batch_size
     )
     result_analysis(result_label_score_path, target_precision=target_precision, pr_epsilon=pr_epsilon)
     if test_config.get('is_gop', False):

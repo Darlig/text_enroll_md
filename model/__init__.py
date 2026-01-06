@@ -7,6 +7,7 @@ from model import TransformerKWSPhone_nocross_w_ctc_kw_adapter_nonlinear
 from model import TransformerKWSPhone_sph_emb_concat_ctc_det
 from model import TransformerKWSPhone_shiying
 from model import TransformerKWSPhone_hubert
+from model import TransformerKWSPhone_hubert_wenet
 
 m_dict = {
     'TransformerKWSPhone_nocross_w_ctc': TransformerKWSPhone_nocross_w_ctc.TransformerKWSPhone_nocross_w_ctc,
@@ -16,4 +17,5 @@ m_dict = {
     'TransformerKWSPhone_sph_emb_concat_ctc_det': TransformerKWSPhone_sph_emb_concat_ctc_det.TransformerKWSPhone_sph_emb_concat_ctc_det,
     'TransformerKWSPhone_shiying': TransformerKWSPhone_shiying.TransformerKWSPhone_shiying,
     'TransformerKWSPhone_hubert': TransformerKWSPhone_hubert.TransformerKWSPhone_hubert,
+    'TransformerKWSPhone_hubert_wenet': TransformerKWSPhone_hubert_wenet.TransformerKWSPhone_hubert_wenet
 }

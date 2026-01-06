@@ -1,0 +1,10 @@
+scipy
+scikit-learn
+matplotlib
+torchmetrics
+pyyaml-include<2
+soundfile
+tensorboard
+pypinyin
+transformers
+#git+https://github.com/openai/whisper.git

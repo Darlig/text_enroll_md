@@ -178,7 +178,14 @@ def process_speech_feats(data: Iterator[Dict], config: Dict[Any, Any]) -> Iterat
             noise_crpt_ratios = list()
 
         # detach speech feats and noise feats
-        speech_feats = [INPUT_DATA_LOADER[input_data_type](x) for x in speech_feats]
+        new_speech_feats = []
+        for x in speech_feats:
+            try:
+                new_speech_feats.append(INPUT_DATA_LOADER[input_data_type](x))
+            except Exception as e:
+                print(f"audio read failed {x}")
+        speech_feats = new_speech_feats
+        #speech_feats = [INPUT_DATA_LOADER[input_data_type](x) for x in speech_feats]
         sample_rate = INPUT_DATA_LOADER['read_sr'](speech_feats[0])  # TODO: this is a temp code 
         speech_feats = [INPUT_DATA_LOADER['rm_sr'](x) for x in speech_feats] if input_data_type == 'raw' else speech_feats
         noise_feats = [INPUT_DATA_LOADER[input_data_type](x) for x in noise_feats]

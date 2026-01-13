@@ -1,0 +1,13 @@
+trained_ckpt_path: exp/hubert_wenet_aishell2_data_aug/run_20260106_151720/kwatt_asr_avg_25-30.pt
+train_config: !include config/train_config/TransformerKWS_nocross/hubert_wenet_aishell2_data_aug.yaml
+phone: resource/500h_with_wenet_drama_sinvxx_1-3s/version_kaldi_ipa/forced_alignment_cut/data_process/phone2id.txt
+#wav_scp: test_uych_samp256.scp
+wav_scp: resources/uych_child_31492/wav.scp
+human_label: resources/uych_child_31492/human_score4_pybz_conv3_wo_actual.json
+result_label_score: result/hubert_wenet_aishell2_data_aug_avg_25-30/uych_child_31492/result_label_score.json
+is_decode: False
+is_gop: False
+target_precision: [0.18, 0.21]
+#target_precision: [0.21]
+#target_precision: [0.21, 0.32]
+batch_size: 32

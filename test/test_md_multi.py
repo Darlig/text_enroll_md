@@ -132,35 +132,41 @@ def inference(model, speech_path, phones_int, is_decode=False, is_gop=False, is_
             input_data = (d.to('cuda:0') for d in input)
             det_result, hyp_result = model.evaluate(input_data)
 
-            # det_result: [B, Lmax] (assumed)
-            det_result_np = det_result.detach().cpu().numpy()
-            hyp_result_np = hyp_result.detach().cpu().numpy()
+            ## det_result: [B, Lmax] (assumed)
+            #det_result_np = det_result.detach().cpu().numpy()
+            #hyp_result_np = hyp_result.detach().cpu().numpy()
 
-            # optional decode / gop
-            if is_decode:
-                asr_result = model.greedy_decode(hyp_result)
-            else:
-                asr_result = None
+            ## optional decode / gop
+            #if is_decode:
+            #    asr_result = model.greedy_decode(hyp_result)
+            #else:
+            #    asr_result = None
 
-            if is_gop:
-                gop_result = model.compute_gop(hyp_result, phones_org_tensor)
-            else:
-                gop_result = None
+            #if is_gop:
+            #    print(f"compute gop() -> hyp_result shape: {hyp_result.shape}, phones_org_tensor shape: {phones_org_tensor.shape}")
+            #    gop_result = model.compute_gop(hyp_result, phones_org_tensor)
+            #else:
+            #    gop_result = None
 
             # trim per-utt by phones_len
             det_results_list = []
             hyp_results_list = []
-            asr_results_list = [] if asr_result is not None else None
-            gop_results_list = [] if gop_result is not None else None
+            asr_results_list = []
+            gop_results_list = []
 
-            for b in range(det_result_np.shape[0]):
+            for b in range(det_result.shape[0]):
                 L = int(phones_len[b].item())
-                det_results_list.append(det_result_np[b, :L].copy())
-                hyp_results_list.append(hyp_result_np[b].copy())
-                if asr_results_list is not None:
-                    asr_results_list.append(asr_result[b])
-                if gop_results_list is not None:
-                    gop_results_list.append(gop_result[b])
+                det_results_list.append(det_result[b, :L])
+                hyp_results_list.append(hyp_result[b])
+                if is_decode:
+                #if asr_results_list is not None:
+                    #print(f"hyp_result shape: {hyp_result.shape}")
+                    #print(f"hyp_result[b, :, :] shape: {hyp_result[b, :, :].shape}")
+                    asr_results_list.append(model.greedy_decode(hyp_result[b].unsqueeze(0)))
+                if is_gop:
+                #if gop_results_list is not None:
+                    #print(f"det_result shape: {det_result.shape}, det_result[b, :L] shape: {det_result[b, :L].shape}")
+                    gop_results_list.append(model.compute_gop(det_result[b, :L].unsqueeze(0)))
 
             return det_results_list, hyp_results_list, asr_results_list, gop_results_list
 
@@ -232,8 +238,11 @@ def test_md(model, speech_scp_path, phone_path, human_label_path, result_label_s
             phones_int = phones_ints[b]
             phones_accuracy = phones_accuracys[b]
             det_result = det_results[b]
-            gop_result = gop_results[b] if gop_results is not None else None
-            asr_result = asr_results[b] if asr_results is not None else None
+            gop_result = None
+            if is_gop:
+                gop_result = gop_results[b] if gop_results is not None else None
+            asr_result = None
+            #asr_result = asr_results[b] if asr_results is not None else None
 
             #print("utt: {}, phones: {}, det_result: {}".format(uttid, phones_int, det_result))
             for i in range(len(det_result)):
@@ -763,6 +772,9 @@ def result_analysis(result_label_score_path, is_gop=False, target_precision=0, p
             if len(parts) < 4:
                 continue
             phone_index, label, score, phone_id = parts
+            if is_gop and score == None:
+                print(f"{phone_index} score == None, skip")
+                continue
             all_results.append([phone_index, float(label), float(score), phone_id])
         # reverse human label and model score because a mispronounciation is a positive sample
         y_true = [ 1 - int(res[1]) for res in all_results ]
